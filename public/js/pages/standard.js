@@ -107,6 +107,18 @@ export async function render(el) {
     mount(
       content,
       h("div", { class: "card table-wrap" }, h("table", { class: "table" }, h("thead", {}, h("tr", {}, ["Kod", "Modul kodi", "Modul nomi", "Kredit"].map((t) => h("th", {}, t)))), h("tbody", {}, MODULES.map((m) => h("tr", {}, h("td", {}, m.code), h("td", {}, m.id), h("td", {}, m.title), h("td", {}, m.credits)))))),
+      h(
+        "div",
+        { class: "card table-wrap" },
+        h("h3", {}, "“Turizmda raqamli texnologiyalar” — modul darslari (o'quv qo'llanma asosida)"),
+        h("p", { class: "small muted" }, "Darslar mazmuni “Turizmda raqamli texnologiyalar” o'quv qo'llanmasidan (Jizzax, 2025) olingan; har bir dars kasb standarti kompetensiyalari bilan bog'langan."),
+        h(
+          "table",
+          { class: "table" },
+          h("thead", {}, h("tr", {}, ["№", "Mavzu (dars)", "Reja", "Kompetensiyalar"].map((t) => h("th", {}, t)))),
+          h("tbody", {}, TOPICS.map((t) => h("tr", {}, h("td", {}, t.num), h("td", {}, h("a", { href: `#/topics/${t.id}` }, t.title)), h("td", { class: "small" }, t.plan.map((x) => h("div", {}, x))), h("td", {}, competencyChips(TOPIC_MAP[t.id] || [])))))
+        )
+      ),
       h("p", { class: "small muted" }, "“Turizmda raqamli texnologiyalar” fani mutaxassislik moduli 5PM0399 “Iqtisodiyotda axborot-kommunikatsiya texnologiyalari va tizimlari” hamda UK-7, UK-8 umumiy kompetensiyalari bilan bevosita bog'liq; professional modullardagi raqamli talablar (axborot texnologiyalaridan foydalanish, SMM/SMO, raqamli xavfsizlik, ma'lumotlar bazasi) KK-2.3, KK-2.4, KK-2.5 orqali qamrab olinadi.")
     );
   }
