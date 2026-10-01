@@ -13,7 +13,8 @@ export async function render(el) {
     ["📚", "Interaktiv mavzular", `${TOPICS.length} ta mavzu: nazariya, tayanch tushunchalar, flesh-kartalar, testlar va 9 xil interaktiv metod.`, "#/topics"],
     ["🧩", "Mustaqil ta'lim", "Shaxsiy o'quv rejasi, mustaqil ish topshiriqlari, o'qituvchi bahosi va refleksiv kundalik.", "#/self-study"],
     ["🎙️", "Virtual gidlik trenajyori", "Sun'iy intellekt turist rolini o'ynaydi va sizni real vaqt rejimida kasbiy vaziyatlarga soladi.", "#/trainer"],
-    ["📝", "So'rovnomalar", "Tadqiqot so'rovnomalari va testlar: natijalar o'qituvchi paneliga avtomatik yig'iladi.", "#/surveys"],
+    ["🗺️", "Marshrut laboratoriyasi", "Turistik marshrutni raqamli xaritada modellashtirish: obyektlar bazasi, masofa va vaqt hisobi, variantlarni taqqoslash, marshrut pasporti.", "#/route-lab"],
+    ["📝", "Kompleks diagnostika", "T0–T2 bosqichlarida anketa, test, amaliy topshiriqlar va refleksiya: natijalar o'qituvchi paneliga avtomatik yig'iladi.", "#/diagnostics"],
   ];
 
   mount(
@@ -55,7 +56,7 @@ export async function render(el) {
             ]
       )
     ),
-    h("section", { class: "grid cols-4" }, features.map(([icon, title, text, href]) => h("a", { href, class: "card feature" }, h("div", { class: "feature-icon" }, icon), h("h3", {}, title), h("p", { class: "muted" }, text)))),
+    h("section", { class: "grid cols-3" }, features.map(([icon, title, text, href]) => h("a", { href, class: "card feature" }, h("div", { class: "feature-icon" }, icon), h("h3", {}, title), h("p", { class: "muted" }, text)))),
     h(
       "section",
       { class: "card how" },
@@ -63,11 +64,12 @@ export async function render(el) {
       h(
         "ol",
         { class: "steps" },
-        h("li", {}, h("b", {}, "Diagnostika. "), "So'rovnomalar bo'limida kirish so'rovnomasi va bilim testini topshiring."),
+        h("li", {}, h("b", {}, "Diagnostika. "), "Diagnostika bo'limida aniqlovchi bosqich (T0): anketa, test, amaliy topshiriqlar va refleksiya."),
         h("li", {}, h("b", {}, "Nazariya va metodlar. "), "Har bir mavzuni o'qing, interaktiv metodlarni bajaring, flesh-kartalar va test bilan mustahkamlang."),
+        h("li", {}, h("b", {}, "Marshrut laboratoriyasi. "), "Turistik marshrutni raqamli xaritada modellashtirib, loyihani o'qituvchiga topshiring."),
         h("li", {}, h("b", {}, "Mustaqil ta'lim. "), "O'quv rejangizni tuzing, mustaqil ishlarni topshiring va o'qituvchi fikrini oling."),
         h("li", {}, h("b", {}, "Trenajyor. "), "Virtual gidlik trenajyorida real vaziyatlarni mashq qiling, AI bahosi asosida o'sing."),
-        h("li", {}, h("b", {}, "Yakuniy baholash. "), "Yakuniy so'rovnoma va testni topshiring — natijalaringiz o'sishini ko'ring.")
+        h("li", {}, h("b", {}, "Yakuniy baholash. "), "Yakunlovchi diagnostika (T2) va marshrut loyihasini himoya qilish — natijalaringiz o'sishini ko'ring.")
       )
     )
   );

@@ -9,6 +9,8 @@ import * as trainer from "./pages/trainer.js";
 import * as surveys from "./pages/surveys.js";
 import * as teacher from "./pages/teacher.js";
 import * as profile from "./pages/profile.js";
+import * as diagnostics from "./pages/diagnostics.js";
+import * as routeLab from "./pages/route-lab.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -19,18 +21,21 @@ const routes = [
   [/^\/self-study$/, selfStudy.render, { auth: true }],
   [/^\/trainer$/, trainer.renderList, { auth: true }],
   [/^\/trainer\/([\w-]+)$/, trainer.renderSession, { auth: true }],
-  [/^\/surveys$/, surveys.renderList, { auth: true }],
+  [/^\/surveys$/, diagnostics.render, { auth: true }],
+  [/^\/diagnostics$/, diagnostics.render, { auth: true }],
+  [/^\/route-lab$/, routeLab.renderList, { auth: true }],
+  [/^\/route-lab\/([\w-]+)$/, routeLab.renderProject, { auth: true }],
   [/^\/surveys\/([\w-]+)$/, surveys.renderSurvey, { auth: true }],
   [/^\/teacher(?:\/([\w-]+))?(?:\/([\w-]+))?$/, teacher.render, { teacher: true }],
   [/^\/profile$/, profile.render, { auth: true }],
 ];
 
 const NAV = [
-  ["#/", "Bosh sahifa", "🏠"],
   ["#/topics", "Mavzular", "📚"],
   ["#/self-study", "Mustaqil ta'lim", "🧩"],
+  ["#/route-lab", "Marshrut", "🗺️"],
   ["#/trainer", "Trenajyor", "🎙️"],
-  ["#/surveys", "So'rovnomalar", "📝"],
+  ["#/diagnostics", "Diagnostika", "📝"],
 ];
 
 const main = document.getElementById("main");
@@ -60,6 +65,7 @@ async function route() {
   }
   const path = (location.hash || "#/").slice(1).split("?")[0];
   document.body.classList.remove("nav-open");
+  document.querySelectorAll(".modal-overlay").forEach((m) => m.remove());
   toggle.setAttribute("aria-expanded", "false");
   renderNav();
   for (const [pattern, fn, opts = {}] of routes) {

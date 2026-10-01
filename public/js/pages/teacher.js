@@ -5,14 +5,18 @@ import { api } from "../api.js";
 import { mean, sd, fmt, scoreResponse, overallScale, levelNames, welchT, pairedT, chiSquare, significance, toCSV } from "../stats.js";
 import { LIKERT_LABELS } from "./surveys.js";
 import { showSession, scoreClass } from "./trainer.js";
+import { resultSheet } from "./diagnostics.js";
+import { projectSummary, gradeCard } from "./route-lab.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
 
 const TABS = [
   ["", "📊 Umumiy"],
+  ["diagnostics", "🧪 Kompleks diagnostika"],
+  ["routes", "🗺 Marshrut loyihalari"],
   ["results", "📈 So'rovnoma natijalari"],
-  ["experiment", "🧪 Tajriba-sinov tahlili"],
+  ["experiment", "📐 So'rovnomalar tahlili"],
   ["builder", "🛠 So'rovnoma konstruktori"],
   ["students", "👥 O'quvchilar"],
   ["trainer", "🎙 Trenajyor natijalari"],
@@ -28,7 +32,7 @@ export async function render(el, tab = "", param) {
     content
   );
   mount(content, loading());
-  const views = { "": overview, results, experiment, builder, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, results, experiment, builder, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   await view(content, param);
@@ -46,6 +50,8 @@ async function overview(el) {
       "div",
       { class: "grid cols-4" },
       card("🎓", o.students, `o'quvchi (TG: ${o.cohorts.experimental}, NG: ${o.cohorts.control})`, "#/teacher/students"),
+      card("🧪", o.diag.complete, `to'liq diagnostika varaqasi · ${o.diag.toGrade} tasi baholashni kutmoqda · faol bosqich: ${o.diag.activeStage || "yo'q"}`, "#/teacher/diagnostics"),
+      card("🗺", o.routes.submitted, `marshrut loyihasi baholashni kutmoqda · ${o.routes.graded} tasi baholangan`, "#/teacher/routes"),
       card("📝", o.responses, `so'rovnoma javobi (${o.surveys} ta so'rovnoma)`, "#/teacher/results"),
       card("🎙", o.trainerSessions, `trenajyor mashg'uloti${o.avgTrainerScore !== null ? ` · o'rtacha ${o.avgTrainerScore} ball` : ""}`, "#/teacher/trainer"),
       card("🧩", o.selfStudySubmissions, `mustaqil ish · ${o.ungraded} tasi baholanmagan`, "#/teacher/self-study")
@@ -841,5 +847,348 @@ function gradeForm(it, redraw) {
         toast(ex.message, "error");
       }
     } }, "Baholash")
+  );
+}
+
+// ---------------- Kompleks diagnostika (1-ilova) ----------------
+
+const DIAG_LEVELS = ["Past", "O'rta", "Yuqori"];
+const gradeLevel = (g) => ({ 3: "Past", 4: "O'rta", 5: "Yuqori" })[g];
+
+async function diagnostics(el) {
+  const data = await api.get("admin/diagnostics");
+  const { instrument, records } = data;
+  let settings = data.settings;
+  const stages = Object.keys(instrument.stages);
+  const f = { stage: settings.activeStage || "T0", cohort: "", group: "", anon: false };
+  const groups = [...new Set(records.map((r) => r.user?.group).filter(Boolean))].sort();
+  const out = h("div", { class: "stack" });
+
+  const stageSel = h("select", {}, h("option", { value: "" }, "Yopiq (faol bosqich yo'q)"), stages.map((st) => h("option", { value: st, selected: settings.activeStage === st }, instrument.stages[st])));
+  const control = h(
+    "div",
+    { class: "card" },
+    h("h3", {}, "Diagnostika bosqichini boshqarish"),
+    h("p", { class: "small muted" }, "O'quvchilar faqat faol bosqichdagi bo'limlarni topshira oladi. T0 — o'qitish boshlanishidan oldin, T2 — shakllantiruvchi ta'sir tugagach. Har bir bosqichda bir xil vositalar, vaqt me'yori va rubrika qo'llanadi."),
+    h("div", { class: "row wrap" }, stageSel, h("button", { class: "btn", onclick: async () => {
+      try {
+        settings = await api.put("admin/diagnostics/settings", { activeStage: stageSel.value || null });
+        toast(settings.activeStage ? `${instrument.stages[settings.activeStage]} ochildi` : "Diagnostika yopildi", "ok");
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    } }, "Saqlash"))
+  );
+
+  const filtered = () => records.filter((r) => r.stage === f.stage && (!f.cohort || (r.user?.cohort || "unassigned") === f.cohort) && (!f.group || r.user?.group === f.group));
+  const who = (r) => (f.anon ? r.user?.code || "—" : `${r.user?.name || "?"} (${r.user?.code || "—"})`);
+
+  const draw = () => {
+    const rs = filtered().sort((a, b) => (a.user?.code || "").localeCompare(b.user?.code || ""));
+    const st = (r, k) => (r[k]?.submittedAt ? "✓" : k === "C" && r.C?.savedAt ? "…" : "—");
+    out.replaceChildren(
+      h(
+        "div",
+        { class: "card table-wrap" },
+        h("div", { class: "row between wrap" }, h("h3", {}, `${instrument.stages[f.stage]}: ${rs.length} ta o'quvchi`), h("button", { class: "btn ghost small", onclick: () => exportDiag(rs, instrument) }, "⬇ Natijalar (CSV)")),
+        rs.length
+          ? h(
+              "table",
+              { class: "table" },
+              h("thead", {}, h("tr", {}, ["O'quvchi", "Guruh", "Tadqiqot guruhi", "A", "B (test)", "C", "D", "M", "KK", "AR", "B — umumiy", ""].map((t) => h("th", {}, t)))),
+              h(
+                "tbody",
+                {},
+                rs.map((r) => {
+                  const res = r.result || {};
+                  const needs = (r.C?.submittedAt && !r.grading?.C) || (r.D?.submittedAt && !r.grading?.D);
+                  return h(
+                    "tr",
+                    {},
+                    h("td", {}, who(r)),
+                    h("td", {}, r.user?.group || "—"),
+                    h("td", {}, COHORTS[r.user?.cohort || "unassigned"]),
+                    h("td", {}, st(r, "A")),
+                    h("td", {}, res.Traw != null ? `${res.Traw}/20${r.B?.overtime ? " ⏰" : ""}` : st(r, "B")),
+                    h("td", {}, r.grading?.C ? "✓ baholangan" : st(r, "C")),
+                    h("td", {}, r.grading?.D ? "✓ baholangan" : st(r, "D")),
+                    ...["M", "KK", "AR"].map((k) => h("td", {}, res[k] ? h("b", { class: `grade-${res[k]}` }, res[k]) : "—")),
+                    h("td", {}, res.B != null ? h("b", {}, `${res.B.toFixed(2)} · ${res.level}`) : "—"),
+                    h("td", { class: "nowrap" },
+                      h("button", { class: `btn small ${needs ? "" : "ghost"}`, onclick: () => gradeDiagModal(r, instrument, () => diagnostics(el)) }, needs ? "Baholash" : "Ko'rish"),
+                      h("button", { class: "icon-btn", title: "Bosqichni qayta topshirishga ruxsat (yozuvni o'chirish)", onclick: async () => {
+                        if (!(await confirmDialog(`${who(r)}: ${f.stage} bosqichidagi barcha javoblar o'chirilsinmi? O'quvchi bosqichni qaytadan topshiradi.`))) return;
+                        await api.del(`admin/diagnostics/${r.stage}/${r.userId}/all`);
+                        toast("O'chirildi", "ok");
+                        diagnostics(el);
+                      } }, "🗑"))
+                  );
+                })
+              )
+            )
+          : h("p", { class: "muted" }, "Bu bosqichda hali yozuvlar yo'q.")
+      ),
+      diagAnalysis(records, instrument, f)
+    );
+  };
+
+  mount(
+    el,
+    control,
+    h(
+      "div",
+      { class: "card row wrap filter-bar" },
+      h("label", { class: "field" }, h("span", {}, "Bosqich"), h("select", { onchange: (e) => ((f.stage = e.target.value), draw()) }, stages.map((st) => h("option", { value: st, selected: f.stage === st }, instrument.stages[st])))),
+      h("label", { class: "field" }, h("span", {}, "Tadqiqot guruhi"), h("select", { onchange: (e) => ((f.cohort = e.target.value), draw()) }, h("option", { value: "" }, "Barchasi"), Object.entries(COHORTS).map(([k, v]) => h("option", { value: k }, v)))),
+      h("label", { class: "field" }, h("span", {}, "O'quv guruhi"), h("select", { onchange: (e) => ((f.group = e.target.value), draw()) }, h("option", { value: "" }, "Barchasi"), groups.map((g) => h("option", { value: g }, g)))),
+      h("label", { class: "check" }, h("input", { type: "checkbox", onchange: (e) => ((f.anon = e.target.checked), draw()) }), "Anonim ko'rinish (faqat kod)")
+    ),
+    out
+  );
+  draw();
+}
+
+function gradeDiagModal(r, ins, reload) {
+  const C = r.grading?.C ? r.grading.C.map((t) => [...t]) : [0, 1, 2].map(() => Array(6).fill(null));
+  const D = r.grading?.D ? [...r.grading.D] : Array(5).fill(null);
+  const note = h("textarea", { rows: 2, placeholder: "Izoh (ixtiyoriy)" }, r.grading?.note || "");
+  const gradeButtons = (arr, idx, levels) =>
+    h("div", { class: "rubric-choices" }, [3, 4, 5].map((g, k) =>
+      h("button", { class: `rubric-choice ${arr[idx] === g ? "active" : ""}`, title: levels[k], onclick: (e) => {
+        arr[idx] = g;
+        [...e.currentTarget.parentNode.children].forEach((b) => b.classList.toggle("active", b === e.currentTarget));
+      } }, h("b", {}, g), h("span", {}, levels[k]))
+    ));
+  const link = (u) => (u ? h("a", { href: u, target: "_blank", rel: "noopener noreferrer" }, u) : h("span", { class: "muted" }, "—"));
+  const cTasks = ins.C.tasks.map((t, ti) => {
+    const ans = r.C?.tasks?.[ti] || {};
+    return h(
+      "div",
+      { class: "card" },
+      h("h4", {}, t.title),
+      t.fields.map((fl) => h("div", { class: "small" }, h("b", {}, fl.label, ": "), fl.type === "url" ? link(ans[fl.key]) : h("div", { class: "pre-wrap answer-box" }, ans[fl.key] || "—"))),
+      h("h4", {}, "Rubrika"),
+      ins.C.rubric.map((ind, ii) => h("div", { class: "rubric-row" }, h("span", { class: "small" }, `${ii + 1}. ${ind.title}`), gradeButtons(C[ti], ii, ind.levels)))
+    );
+  });
+  const dPart = h(
+    "div",
+    { class: "card" },
+    h("h4", {}, ins.D.title),
+    h("dl", { class: "answers" }, ins.D.questions.map((q, i) => [h("dt", {}, q), h("dd", { class: "pre-wrap" }, r.D?.answers?.[i] || "—")])),
+    h("h4", {}, "Refleksiya rubrikasi"),
+    ins.D.rubric.map((ind, ii) => h("div", { class: "rubric-row" }, h("span", { class: "small" }, `${ii + 1}. ${ind.title}`), gradeButtons(D, ii, ind.levels)))
+  );
+  let close;
+  close = modal(
+    `${r.user?.code || ""} — ${r.user?.name || ""} · ${r.stage}`,
+    h(
+      "div",
+      { class: "stack" },
+      r.result?.B != null && resultSheet(r.result, { code: r.user?.code, group: r.user?.group, stage: r.stage, date: r.updatedAt }),
+      h("p", { class: "small muted" }, `A: ${r.A?.submittedAt ? fmtDate(r.A.submittedAt) : "—"} · B: ${r.B?.submittedAt ? `${fmtDate(r.B.submittedAt)} (${Math.round((r.B.seconds || 0) / 60)} daq${r.B.overtime ? ", vaqt me'yoridan oshgan" : ""})` : "—"} · C: ${r.C?.submittedAt ? fmtDate(r.C.submittedAt) : "—"} · D: ${r.D?.submittedAt ? fmtDate(r.D.submittedAt) : "—"}`),
+      h("h3", {}, ins.C.title),
+      r.C?.submittedAt ? cTasks : h("p", { class: "muted" }, "C-bo'lim hali topshirilmagan."),
+      r.D?.submittedAt ? dPart : h("p", { class: "muted" }, "D-bo'lim hali topshirilmagan."),
+      h("label", { class: "field" }, h("span", {}, "Izoh"), note),
+      h("div", { class: "row end" }, h("button", { class: "btn", onclick: async () => {
+        const payload = { note: note.value };
+        const cDone = C.every((t) => t.every((g) => g != null));
+        const dDone = D.every((g) => g != null);
+        if (r.C?.submittedAt) {
+          if (!cDone && C.flat().some((g) => g != null)) return toast("C-bo'lim: barcha 18 ta indikatorni baholang", "warn");
+          if (cDone) payload.C = C;
+        }
+        if (r.D?.submittedAt) {
+          if (!dDone && D.some((g) => g != null)) return toast("D-bo'lim: barcha 5 ta indikatorni baholang", "warn");
+          if (dDone) payload.D = D;
+        }
+        try {
+          await api.put(`admin/diagnostics/${r.stage}/${r.userId}/grade`, payload);
+          toast("Baholar saqlandi", "ok");
+          close();
+          reload();
+        } catch (e) {
+          toast(e.message, "error");
+        }
+      } }, "💾 Baholarni saqlash"))
+    ),
+    { wide: true }
+  );
+}
+
+function exportDiag(rs, ins) {
+  const header = ["Respondent kodi", "F.I.Sh.", "Guruh", "Tadqiqot guruhi", "Bosqich", "M xom (/75)", "M baho", "T xom (/20)", "T %", "T baho", "KQ o'rtacha", "KQ baho", "KK", "P o'rtacha", "P baho", "R o'rtacha", "R baho", "AR", "B (umumiy)", "Daraja", ...ins.A.items.map((_, i) => `A${i + 1}`), ...ins.B.questions.map((_, i) => `B${i + 1}`)];
+  const num = (x, d = 2) => (x == null ? "" : String(+x.toFixed(d)).replace(".", ","));
+  const rows = rs.map((r) => {
+    const x = r.result || {};
+    return [r.user?.code, r.user?.name, r.user?.group, COHORTS[r.user?.cohort || "unassigned"], r.stage, x.Mraw ?? "", x.M ?? "", x.Traw ?? "", num(x.Tpct, 0), x.T ?? "", num(x.KQavg), x.KQ ?? "", x.KK ?? "", num(x.Pavg), x.P ?? "", num(x.Ravg), x.R ?? "", x.AR ?? "", num(x.B), x.level ?? "", ...Array.from({ length: 15 }, (_, i) => r.A?.answers?.[i] ?? ""), ...Array.from({ length: 20 }, (_, i) => (r.B?.answers?.[i] != null ? "ABCD"[r.B.answers[i]] : ""))];
+  });
+  downloadFile(`diagnostika-${rs[0]?.stage || ""}.csv`, toCSV([header, ...rows]));
+}
+
+function diagAnalysis(records, ins, f) {
+  const complete = records.filter((r) => r.result?.B != null);
+  const stages = Object.keys(ins.stages);
+  const pre = h("select", {}, stages.map((s) => h("option", { value: s, selected: s === "T0" }, ins.stages[s])));
+  const post = h("select", {}, stages.map((s) => h("option", { value: s, selected: s === "T2" }, ins.stages[s])));
+  const box = h("div", { class: "stack" });
+  const run = () => box.replaceChildren(diagReport(complete, pre.value, post.value, ins));
+  pre.addEventListener("change", run);
+  post.addEventListener("change", run);
+  run();
+  return h(
+    "div",
+    { class: "card" },
+    h("h2", {}, "Tajriba-sinov natijalari tahlili (TG va NG)"),
+    h("p", { class: "small muted" }, "Faqat barcha bo'limlari baholangan (to'liq) diagnostika varaqalari hisobga olinadi. Mezonlar bo'yicha 3 — past, 4 — o'rta, 5 — yuqori; umumiy B: 3,00–3,49 past, 3,50–4,49 o'rta, 4,50–5,00 yuqori."),
+    h("div", { class: "grid cols-2" }, h("label", { class: "field" }, h("span", {}, "Boshlang'ich bosqich"), pre), h("label", { class: "field" }, h("span", {}, "Yakuniy bosqich"), post)),
+    box
+  );
+}
+
+function diagReport(complete, preSt, postSt, ins) {
+  if (!complete.length) return emptyState("📊", "To'liq diagnostika varaqalari hali yo'q", "O'quvchilar barcha bo'limlarni topshirib, siz C va D bo'limlarini baholaganingizdan keyin tahlil shu yerda paydo bo'ladi.");
+  const groups = ["experimental", "control"];
+  const sel = (st, g) => complete.filter((r) => r.stage === st && (r.user?.cohort || "unassigned") === g);
+  const csv = [["Ko'rsatkich", "Guruh", "Bosqich", "n", "M", "SD", "Past", "O'rta", "Yuqori"]];
+  const metrics = [["M", "Motivatsion-qadriyatli (M)"], ["KK", "Kognitiv-kommunikativ (KK)"], ["AR", "Amaliy-refleksiv (AR)"], ["B", "Umumiy tayyorgarlik (B)"]];
+  const lvl = (k, r) => (k === "B" ? r.result.level : gradeLevel(r.result[k]));
+
+  const metricRows = metrics.flatMap(([k, title]) =>
+    groups.flatMap((g) =>
+      [preSt, postSt].map((st) => {
+        const rs = sel(st, g);
+        const v = rs.map((r) => r.result[k]);
+        const dist = DIAG_LEVELS.map((L) => rs.filter((r) => lvl(k, r) === L).length);
+        csv.push([title, COHORTS[g], st, rs.length, fmt(mean(v)), fmt(sd(v)), ...dist]);
+        return h("tr", {}, h("td", {}, title), h("td", {}, COHORTS[g]), h("td", {}, st), h("td", {}, rs.length), h("td", {}, v.length ? `${fmt(mean(v))} ± ${fmt(sd(v))}` : "—"), dist.map((n) => h("td", {}, rs.length ? `${n} (${fmt((n / rs.length) * 100, 1)}%)` : "—")));
+      })
+    )
+  );
+
+  const B = (st, g) => sel(st, g).map((r) => r.result.B);
+  const paired = (g) => {
+    const post = sel(postSt, g);
+    const pairs = post.map((r) => [complete.find((x) => x.stage === preSt && x.userId === r.userId), r]).filter(([a]) => a);
+    return { res: pairedT(pairs.map(([a]) => a.result.B), pairs.map(([, b]) => b.result.B)), n: pairs.length };
+  };
+  const tPre = welchT(B(preSt, "experimental"), B(preSt, "control"));
+  const tPost = welchT(B(postSt, "experimental"), B(postSt, "control"));
+  const levelsB = (st, g) => DIAG_LEVELS.map((L) => sel(st, g).filter((r) => r.result.level === L).length);
+  const chiPre = chiSquare([levelsB(preSt, "experimental"), levelsB(preSt, "control")]);
+  const chiPost = chiSquare([levelsB(postSt, "experimental"), levelsB(postSt, "control")]);
+  const eta = mean(B(postSt, "experimental")) / mean(B(postSt, "control"));
+  const tStr = (t) => (t ? `t = ${fmt(t.t)}, df = ${fmt(t.df, 1)}; ${significance(t.p)}; d = ${fmt(t.d)}` : "Ma'lumot yetarli emas");
+  const chiStr = (c) => (c ? `χ² = ${fmt(c.chi2, 3)}, df = ${c.df}; ${significance(c.p)}` : "Ma'lumot yetarli emas");
+
+  return h(
+    "div",
+    { class: "stack" },
+    h("div", { class: "table-wrap" }, h("table", { class: "table" }, h("thead", {}, h("tr", {}, ["Ko'rsatkich", "Guruh", "Bosqich", "n", "M ± SD", ...DIAG_LEVELS].map((t) => h("th", {}, t)))), h("tbody", {}, metricRows))),
+    h(
+      "div",
+      { class: "grid cols-3" },
+      resultBox(`TG va NG — ${preSt} (Welch t, B bo'yicha)`, tStr(tPre), tPre && tPre.p >= 0.05 ? "Guruhlar boshlang'ich bosqichda statistik jihatdan bir jinsli." : ""),
+      resultBox(`TG va NG — ${postSt} (Welch t, B bo'yicha)`, tStr(tPost), tPost && tPost.p < 0.05 && tPost.t > 0 ? "Tajriba guruhi natijalari nazorat guruhidan statistik ahamiyatli darajada yuqori." : ""),
+      resultBox("Samaradorlik koeffitsiyenti", Number.isFinite(eta) ? `η = B̄(TG) / B̄(NG) = ${fmt(eta, 3)}` : "—", Number.isFinite(eta) && eta > 1 ? `TG natijasi ${fmt((eta - 1) * 100, 1)}% ga yuqori.` : "")
+    ),
+    h(
+      "div",
+      { class: "grid cols-2" },
+      ...groups.map((g) => {
+        const { res, n } = paired(g);
+        return resultBox(`${COHORTS[g]}: ${preSt} → ${postSt} (juftlangan t)`, res ? `Δ = ${fmt(res.meanDiff)}; t(${res.df}) = ${fmt(res.t)}; ${significance(res.p)} (n=${n})` : "Ma'lumot yetarli emas", "");
+      })
+    ),
+    h("p", { class: "small" }, h("b", {}, "Pirson χ² mezoni (B darajalari, TG va NG): "), `${preSt} — ${chiStr(chiPre)}; ${postSt} — ${chiStr(chiPost)}.`),
+    levelChart(DIAG_LEVELS, [
+      { name: `TG — ${preSt}`, values: levelsB(preSt, "experimental") },
+      { name: `TG — ${postSt}`, values: levelsB(postSt, "experimental") },
+      { name: `NG — ${preSt}`, values: levelsB(preSt, "control") },
+      { name: `NG — ${postSt}`, values: levelsB(postSt, "control") },
+    ]),
+    h("div", { class: "row end" }, h("button", { class: "btn ghost", onclick: () => downloadFile(`diagnostika-tahlil-${preSt}-${postSt}.csv`, toCSV(csv)) }, "⬇ Tahlil jadvali (CSV)"))
+  );
+}
+
+// ---------------- Marshrut loyihalari ----------------
+
+async function routeProjects(el) {
+  const { projects, rubric, levels } = await api.get("admin/routes");
+  if (!projects.length) return mount(el, emptyState("🗺", "Hali topshirilgan marshrut loyihalari yo'q"));
+  let onlyPending = false;
+  const list = h("div", { class: "stack" });
+  const draw = () => {
+    const rs = projects.filter((p) => !onlyPending || p.status === "submitted" || p.changedAfterSubmit);
+    list.replaceChildren(
+      h(
+        "div",
+        { class: "card table-wrap" },
+        h(
+          "table",
+          { class: "table" },
+          h("thead", {}, h("tr", {}, ["O'quvchi", "Guruh", "Loyiha", "Daraja", "Obyektlar", "Topshirilgan", "Baho", ""].map((t) => h("th", {}, t)))),
+          h("tbody", {}, rs.map((p) =>
+            h(
+              "tr",
+              {},
+              h("td", {}, `${p.user?.name} (${p.user?.code || "—"})`),
+              h("td", {}, p.user?.group || "—"),
+              h("td", {}, p.title, p.changedAfterSubmit && h("span", { class: "badge badge-warn" }, "o'zgartirilgan")),
+              h("td", {}, `${p.level}-daraja`),
+              h("td", {}, p.objects?.length || 0),
+              h("td", {}, fmtDate(p.submittedAt)),
+              h("td", {}, p.grade ? h("b", {}, `${p.grade.total} · ${p.grade.level}`) : h("span", { class: "badge badge-warn" }, "Kutilmoqda")),
+              h("td", {}, h("button", { class: "btn small", onclick: () => gradeRouteModal(p, rubric, levels, () => routeProjects(el)) }, p.grade ? "Ko'rish" : "Baholash"))
+            )
+          ))
+        )
+      ),
+      h("div", { class: "row end" }, h("button", { class: "btn ghost", onclick: () => downloadFile("marshrut-loyihalari.csv", toCSV([["Kod", "O'quvchi", "Guruh", "Tadqiqot guruhi", "Loyiha", "Daraja", ...rubric.map((c) => `${c.title} (${c.max})`), "Jami", "Daraja (baho)"], ...rs.map((p) => [p.user?.code, p.user?.name, p.user?.group, COHORTS[p.user?.cohort || "unassigned"], p.title, p.level, ...rubric.map((_, i) => p.grade?.scores[i] ?? ""), p.grade?.total ?? "", p.grade?.level ?? ""])])) }, "⬇ CSV"))
+    );
+  };
+  mount(el, h("label", { class: "check" }, h("input", { type: "checkbox", onchange: (e) => ((onlyPending = e.target.checked), draw()) }), "Faqat baholanmaganlar"), list);
+  draw();
+}
+
+function gradeRouteModal(p, rubric, levels, reload) {
+  const scores = p.grade ? [...p.grade.scores] : rubric.map(() => null);
+  const totalEl = h("b");
+  const drawTotal = () => {
+    const t = scores.reduce((a, x) => a + (Number(x) || 0), 0);
+    const lv = levels.find((l) => t >= l.min);
+    totalEl.textContent = `${t} / 100 — ${lv.label}`;
+  };
+  const fb = h("textarea", { rows: 3, placeholder: "O'quvchiga izoh va tavsiyalar" }, p.grade?.feedback || "");
+  drawTotal();
+  let close;
+  close = modal(
+    `${p.title} — ${p.user?.name}`,
+    h(
+      "div",
+      { class: "stack" },
+      p.grade && gradeCard(p.grade, rubric),
+      projectSummary(p),
+      h("h3", {}, "Baholash mezonlari (100 ball)"),
+      h("div", { class: "stack" }, rubric.map((c, i) =>
+        h("div", { class: "rubric-row" }, h("span", {}, `${i + 1}. ${c.title}`), h("div", { class: "row" }, h("input", { type: "number", min: 0, max: c.max, value: scores[i] ?? "", class: "w-xs", oninput: (e) => { scores[i] = e.target.value === "" ? null : Number(e.target.value); drawTotal(); } }), h("span", { class: "muted small" }, `/ ${c.max}`)))
+      )),
+      h("p", {}, "Jami: ", totalEl),
+      h("details", {}, h("summary", { class: "small" }, "Darajalar tavsifi"), h("ul", { class: "small" }, levels.map((l) => h("li", {}, h("b", {}, `${l.label} (${l.min}+): `), l.text)))),
+      h("label", { class: "field" }, h("span", {}, "Izoh"), fb),
+      h("div", { class: "row end" }, h("button", { class: "btn", onclick: async () => {
+        if (scores.some((x) => x == null)) return toast("Barcha mezonlarni baholang", "warn");
+        try {
+          await api.put(`admin/routes/${p.userId}/${p.id}/grade`, { scores, feedback: fb.value });
+          toast("Baho saqlandi", "ok");
+          close();
+          reload();
+        } catch (e) {
+          toast(e.message, "error");
+        }
+      } }, "💾 Bahoni saqlash"))
+    ),
+    { wide: true }
   );
 }

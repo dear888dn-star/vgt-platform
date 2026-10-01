@@ -13,6 +13,8 @@ import {
 } from "../lib/scenarios.mjs";
 import { aiEnabled, streamText, completeText, MODEL } from "../lib/ai.mjs";
 import { demoReply, demoEvaluation } from "../lib/demo.mjs";
+import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagnostics.mjs";
+import { ROUTE_RUBRIC, ROUTE_LEVELS, routeLevel } from "../lib/route-task.mjs";
 
 const MAX_TURNS = 40;
 const TEST_LEVELS = [
@@ -102,6 +104,7 @@ async function register(req) {
     createdAt: new Date().toISOString(),
     ...(await hashPassword(password)),
   };
+  if (role === "student") user.code = await nextCode();
   await store.set(userKey(user.id), user);
   await store.set(emailKey(email), { id: user.id });
   return json({ token: createToken(user), user: publicUser(user) }, 201);
@@ -357,7 +360,9 @@ async function deleteResponse(req, id, userId) {
 
 async function listStudents(req) {
   await requireTeacher(req);
-  const users = (await getMany("user/")).map(publicUser).sort((a, b) => a.name.localeCompare(b.name));
+  const all = await getMany("user/");
+  for (const u of all) await ensureCode(u);
+  const users = all.map(publicUser).sort((a, b) => a.name.localeCompare(b.name));
   return json(users);
 }
 
@@ -375,12 +380,15 @@ async function updateStudent(req, id) {
 async function overview(req) {
   await requireTeacher(req);
   const store = db();
-  const [users, surveys, responses, sessions, submissions] = await Promise.all([
+  const [users, surveys, responses, sessions, submissions, diag, routesAll, settings] = await Promise.all([
     getMany("user/"),
     allSurveys(),
     store.list("response/"),
     getMany("trainer/"),
     getMany("selfstudy/"),
+    getMany("diag/"),
+    getMany("route/"),
+    diagSettings(),
   ]);
   const students = users.filter((u) => u.role === "student");
   return json({
@@ -397,6 +405,16 @@ async function overview(req) {
     selfStudySubmissions: submissions.length,
     ungraded: submissions.filter((s) => s.grade == null).length,
     aiEnabled: aiEnabled(),
+    diag: {
+      activeStage: settings.activeStage,
+      records: diag.length,
+      toGrade: diag.filter((r) => (r.C?.submittedAt && !r.grading?.C) || (r.D?.submittedAt && !r.grading?.D)).length,
+      complete: diag.filter((r) => r.result?.B).length,
+    },
+    routes: {
+      submitted: routesAll.filter((p) => p.status === "submitted").length,
+      graded: routesAll.filter((p) => p.status === "graded").length,
+    },
   });
 }
 
@@ -598,6 +616,255 @@ async function allSessions(req) {
   return json(sessions.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
 }
 
+// ---------- Anonim kod ----------
+
+async function nextCode() {
+  const store = db();
+  const counter = (await store.get("meta/code-counter")) || { n: 0 };
+  counter.n += 1;
+  await store.set("meta/code-counter", counter);
+  return `TM-${String(counter.n).padStart(3, "0")}`;
+}
+
+async function ensureCode(user) {
+  if (user.role !== "student" || user.code) return user;
+  user.code = await nextCode();
+  await db().set(userKey(user.id), user);
+  return user;
+}
+
+// ---------- Kompleks diagnostika (1-ilova) ----------
+
+const diagKey = (stage, uid) => `diag/${stage}/${uid}`;
+
+async function diagSettings() {
+  return (await db().get("meta/diag-settings")) || { activeStage: null };
+}
+
+function checkStage(stage) {
+  if (!STAGES[stage]) throw new HttpError(400, "Bosqich noto'g'ri");
+}
+
+function studentView(rec) {
+  if (!rec) return null;
+  // O'quvchiga test kaliti va o'qituvchi baholari ko'rsatilmaydi; natija faqat to'liq baholangandan keyin.
+  const { grading, result, ...rest } = rec;
+  return { ...rest, graded: Boolean(result?.B), result: result?.B ? result : null };
+}
+
+async function myDiagnostics(req) {
+  const user = await ensureCode(await requireUser(req));
+  const settings = await diagSettings();
+  const records = {};
+  for (const st of Object.keys(STAGES)) records[st] = studentView(await db().get(diagKey(st, user.id)));
+  return json({ instrument: publicInstrument(), activeStage: settings.activeStage, records, code: user.code });
+}
+
+async function loadActiveRecord(user, stage) {
+  checkStage(stage);
+  const settings = await diagSettings();
+  if (settings.activeStage !== stage) throw new HttpError(403, "Bu bosqich hozir faol emas. O'qituvchi bosqichni ochishini kuting.");
+  const rec = (await db().get(diagKey(stage, user.id))) || { stage, userId: user.id, createdAt: new Date().toISOString() };
+  rec.user = { name: user.name, group: user.group, cohort: user.cohort, code: user.code };
+  return rec;
+}
+
+async function saveRecord(rec) {
+  rec.result = computeResult(rec);
+  rec.updatedAt = new Date().toISOString();
+  await db().set(diagKey(rec.stage, rec.userId), rec);
+  return json(studentView(rec));
+}
+
+async function diagSection(req, stage, section) {
+  const user = await ensureCode(await requireUser(req));
+  if (user.role !== "student") throw new HttpError(403, "Diagnostika faqat o'quvchilar uchun");
+  const rec = await loadActiveRecord(user, stage);
+  const b = await body(req);
+  const now = new Date().toISOString();
+
+  if (section === "A") {
+    if (rec.A?.submittedAt) throw new HttpError(409, "A-bo'lim allaqachon topshirilgan");
+    const a = b.answers;
+    if (!Array.isArray(a) || a.length !== 15 || a.some((x) => ![1, 2, 3, 4, 5].includes(x))) throw new HttpError(400, "Barcha 15 ta fikrga javob bering");
+    rec.A = { answers: a, submittedAt: now };
+  } else if (section === "B-start") {
+    if (rec.B?.submittedAt) throw new HttpError(409, "Test allaqachon topshirilgan");
+    rec.B = rec.B?.startedAt ? rec.B : { startedAt: now };
+  } else if (section === "B") {
+    if (!rec.B?.startedAt) throw new HttpError(400, "Test boshlanmagan");
+    if (rec.B.submittedAt) throw new HttpError(409, "Test allaqachon topshirilgan");
+    const a = Array.isArray(b.answers) ? b.answers.slice(0, 20) : [];
+    const clean = Array.from({ length: 20 }, (_, i) => ([0, 1, 2, 3].includes(a[i]) ? a[i] : null));
+    const seconds = Math.round((Date.now() - Date.parse(rec.B.startedAt)) / 1000);
+    rec.B = { ...rec.B, answers: clean, submittedAt: now, seconds, overtime: seconds > 25 * 60 + 30 };
+  } else if (section === "C") {
+    if (rec.C?.submittedAt) throw new HttpError(409, "C-bo'lim allaqachon topshirilgan");
+    const tasks = SECTION_C.tasks.map((t, i) => {
+      const src = (Array.isArray(b.tasks) && b.tasks[i]) || {};
+      const out = {};
+      for (const f of t.fields) {
+        const v = str(src[f.key], f.type === "url" ? 500 : 8000);
+        if (f.type === "url" && v && !/^https?:\/\//i.test(v)) throw new HttpError(400, `${i + 1}-topshiriq: havola http(s):// bilan boshlanishi kerak`);
+        out[f.key] = v;
+      }
+      return out;
+    });
+    rec.C = { ...(rec.C || {}), tasks, startedAt: rec.C?.startedAt || now, savedAt: now };
+    if (b.final) {
+      const missing = SECTION_C.tasks.some((t, i) => t.fields.some((f) => !f.optional && !tasks[i][f.key]));
+      if (missing) throw new HttpError(400, "Barcha topshiriqlarning majburiy maydonlarini to'ldiring");
+      rec.C.submittedAt = now;
+    }
+  } else if (section === "D") {
+    if (rec.D?.submittedAt) throw new HttpError(409, "D-bo'lim allaqachon topshirilgan");
+    const a = Array.isArray(b.answers) ? b.answers.map((x) => str(x, 3000)) : [];
+    if (a.length !== 5 || a.some((x) => x.length < 3)) throw new HttpError(400, "Barcha 5 ta savolga javob yozing");
+    rec.D = { answers: a, submittedAt: now };
+  } else {
+    throw new HttpError(404, "Bo'lim topilmadi");
+  }
+  return saveRecord(rec);
+}
+
+async function adminDiagnostics(req) {
+  await requireTeacher(req);
+  const [records, users, settings] = await Promise.all([getMany("diag/"), getMany("user/"), diagSettings()]);
+  const byId = Object.fromEntries(users.map((u) => [u.id, u]));
+  for (const r of records) {
+    const u = byId[r.userId];
+    if (u) r.user = { name: u.name, group: u.group, cohort: u.cohort || "unassigned", code: u.code, email: u.email };
+  }
+  return json({ instrument: { ...publicInstrument() }, settings, records });
+}
+
+async function setDiagSettings(req) {
+  await requireTeacher(req);
+  const b = await body(req);
+  const activeStage = b.activeStage && STAGES[b.activeStage] ? b.activeStage : null;
+  await db().set("meta/diag-settings", { activeStage, updatedAt: new Date().toISOString() });
+  return json({ activeStage });
+}
+
+async function gradeDiagnostics(req, stage, userId) {
+  const teacher = await requireTeacher(req);
+  checkStage(stage);
+  const rec = await db().get(diagKey(stage, userId));
+  if (!rec) throw new HttpError(404, "Yozuv topilmadi");
+  const b = await body(req);
+  const ok = (g) => [3, 4, 5].includes(g);
+  const grading = { ...(rec.grading || {}) };
+  if (b.C !== undefined) {
+    if (!Array.isArray(b.C) || b.C.length !== 3 || b.C.some((t) => !Array.isArray(t) || t.length !== 6 || !t.every(ok))) throw new HttpError(400, "C-bo'lim: har bir topshiriq uchun 6 ta indikatorni 3–5 baho bilan baholang");
+    grading.C = b.C;
+  }
+  if (b.D !== undefined) {
+    if (!Array.isArray(b.D) || b.D.length !== 5 || !b.D.every(ok)) throw new HttpError(400, "D-bo'lim: 5 ta indikatorni 3–5 baho bilan baholang");
+    grading.D = b.D;
+  }
+  grading.by = teacher.name;
+  grading.at = new Date().toISOString();
+  if (b.note !== undefined) grading.note = str(b.note, 2000);
+  rec.grading = grading;
+  rec.result = computeResult(rec);
+  await db().set(diagKey(stage, userId), rec);
+  return json(rec);
+}
+
+async function resetDiagnostics(req, stage, userId, section) {
+  await requireTeacher(req);
+  checkStage(stage);
+  const key = diagKey(stage, userId);
+  const rec = await db().get(key);
+  if (!rec) throw new HttpError(404, "Yozuv topilmadi");
+  if (section === "all") await db().del(key);
+  else {
+    if (!["A", "B", "C", "D"].includes(section)) throw new HttpError(400, "Bo'lim noto'g'ri");
+    delete rec[section];
+    if (section === "C" && rec.grading) delete rec.grading.C;
+    if (section === "D" && rec.grading) delete rec.grading.D;
+    rec.result = computeResult(rec);
+    await db().set(key, rec);
+  }
+  return json({ ok: true });
+}
+
+// ---------- Marshrut laboratoriyasi ----------
+
+const routeKey = (uid, id) => `route/${uid}/${id}`;
+
+async function myRoutes(req) {
+  const user = await requireUser(req);
+  const items = await getMany(`route/${user.id}/`);
+  return json({ projects: items.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")), rubric: ROUTE_RUBRIC, levels: ROUTE_LEVELS });
+}
+
+async function saveRoute(req, id) {
+  const user = await requireUser(req);
+  const b = await body(req);
+  if (JSON.stringify(b).length > 300_000) throw new HttpError(413, "Loyiha hajmi juda katta");
+  const key = routeKey(user.id, id);
+  const prev = await db().get(key);
+  const project = {
+    ...b,
+    id,
+    userId: user.id,
+    user: { name: user.name, group: user.group, code: user.code, cohort: user.cohort },
+    title: str(b.title, 200) || "Nomsiz marshrut",
+    status: prev?.status === "graded" || prev?.status === "submitted" ? prev.status : "draft",
+    grade: prev?.grade,
+    submittedAt: prev?.submittedAt,
+    createdAt: prev?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  if (prev?.status === "graded" || prev?.status === "submitted") project.changedAfterSubmit = true;
+  await db().set(key, project);
+  return json(project);
+}
+
+async function submitRoute(req, id) {
+  const user = await requireUser(req);
+  const key = routeKey(user.id, id);
+  const p = await db().get(key);
+  if (!p) throw new HttpError(404, "Loyiha topilmadi");
+  if (!Array.isArray(p.objects) || p.objects.length < 3) throw new HttpError(400, "Marshrutga kamida 3 ta obyekt kiriting");
+  Object.assign(p, { status: "submitted", submittedAt: new Date().toISOString(), changedAfterSubmit: false });
+  await db().set(key, p);
+  return json(p);
+}
+
+async function deleteRoute(req, id) {
+  const user = await requireUser(req);
+  const p = await db().get(routeKey(user.id, id));
+  if (p && p.status !== "draft") throw new HttpError(409, "Topshirilgan loyihani o'chirib bo'lmaydi");
+  await db().del(routeKey(user.id, id));
+  return json({ ok: true });
+}
+
+async function adminRoutes(req) {
+  await requireTeacher(req);
+  const items = await getMany("route/");
+  return json({ projects: items.filter((p) => p.status !== "draft").sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || "")), rubric: ROUTE_RUBRIC, levels: ROUTE_LEVELS });
+}
+
+async function gradeRoute(req, userId, id) {
+  const teacher = await requireTeacher(req);
+  const key = routeKey(userId, id);
+  const p = await db().get(key);
+  if (!p) throw new HttpError(404, "Loyiha topilmadi");
+  const b = await body(req);
+  const scores = ROUTE_RUBRIC.map((c, i) => {
+    const v = Number(b.scores?.[i]);
+    if (!Number.isFinite(v) || v < 0 || v > c.max) throw new HttpError(400, `"${c.title}" mezoni 0–${c.max} oralig'ida bo'lishi kerak`);
+    return Math.round(v);
+  });
+  const total = scores.reduce((a, x) => a + x, 0);
+  p.grade = { scores, total, level: routeLevel(total), feedback: str(b.feedback, 3000), by: teacher.name, at: new Date().toISOString() };
+  p.status = "graded";
+  await db().set(key, p);
+  return json(p);
+}
+
 // ---------- Router ----------
 
 const routes = [
@@ -621,6 +888,21 @@ const routes = [
   ["POST", /^trainer\/hint$/, trainerHint],
   ["POST", /^trainer\/evaluate$/, trainerEvaluate],
   ["GET", /^trainer\/sessions$/, mySessions],
+
+  ["GET", /^diagnostics$/, myDiagnostics],
+  ["PUT", /^diagnostics\/(T[012])\/(A|B|C|D)$/, diagSection],
+  ["POST", /^diagnostics\/(T[012])\/(B-start)$/, diagSection],
+  ["GET", /^admin\/diagnostics$/, adminDiagnostics],
+  ["PUT", /^admin\/diagnostics\/settings$/, setDiagSettings],
+  ["PUT", /^admin\/diagnostics\/(T[012])\/([\w-]+)\/grade$/, gradeDiagnostics],
+  ["DELETE", /^admin\/diagnostics\/(T[012])\/([\w-]+)\/(A|B|C|D|all)$/, resetDiagnostics],
+
+  ["GET", /^routes$/, myRoutes],
+  ["PUT", /^routes\/([\w-]+)$/, saveRoute],
+  ["POST", /^routes\/([\w-]+)\/submit$/, submitRoute],
+  ["DELETE", /^routes\/([\w-]+)$/, deleteRoute],
+  ["GET", /^admin\/routes$/, adminRoutes],
+  ["PUT", /^admin\/routes\/([\w-]+)\/([\w-]+)\/grade$/, gradeRoute],
 
   ["GET", /^admin\/overview$/, overview],
   ["GET", /^admin\/surveys$/, adminSurveys],

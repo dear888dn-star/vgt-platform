@@ -9,13 +9,13 @@ const STAGES = [
 
 export const LIKERT_LABELS = ["Mutlaqo qo'shilmayman", "Qo'shilmayman", "Betaraf", "Qo'shilaman", "To'liq qo'shilaman"];
 
-export async function renderList(el) {
+export async function renderList(el, { embedded = false } = {}) {
   mount(el, loading());
   const list = await api.get("surveys");
   const done = list.filter((s) => s.completed).length;
   mount(
     el,
-    h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "So'rovnomalar"), h("p", { class: "muted" }, "Javoblaringiz ilmiy tadqiqot maqsadida umumlashtirilgan holda tahlil qilinadi. Iltimos, samimiy javob bering."))),
+    !embedded && h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "So'rovnomalar"), h("p", { class: "muted" }, "Javoblaringiz ilmiy tadqiqot maqsadida umumlashtirilgan holda tahlil qilinadi. Iltimos, samimiy javob bering."))),
     list.length
       ? [
           h("div", { class: "card" }, h("div", { class: "row between small" }, h("span", {}, "Topshirilgan so'rovnomalar"), h("b", {}, `${done} / ${list.length}`)), progressBar(done, list.length)),
@@ -25,7 +25,7 @@ export async function renderList(el) {
             return h(
               "section",
               {},
-              h("h2", { class: "section-title" }, title),
+              h(embedded ? "h3" : "h2", { class: "section-title" }, title),
               h(
                 "div",
                 { class: "grid cols-2" },
@@ -88,7 +88,7 @@ export async function renderSurvey(el, id) {
           h("h1", {}, "Rahmat! Javoblaringiz qabul qilindi."),
           res.testScore !== undefined && h("p", { class: "lead" }, "Test natijangiz: ", h("b", {}, `${res.testScore}%`)),
           h("p", { class: "muted" }, "Natijalar o'qituvchi panelida tadqiqot maqsadida umumlashtiriladi."),
-          h("div", { class: "row center" }, h("a", { href: "#/surveys", class: "btn" }, "Boshqa so'rovnomalar"), h("a", { href: "#/", class: "btn ghost" }, "Bosh sahifa"))
+          h("div", { class: "row center" }, h("a", { href: "#/diagnostics", class: "btn" }, "Diagnostika va so'rovnomalar"), h("a", { href: "#/", class: "btn ghost" }, "Bosh sahifa"))
         )
       );
     } catch (e) {
@@ -100,7 +100,7 @@ export async function renderSurvey(el, id) {
   updateProgress();
   mount(
     el,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/surveys" }, "So'rovnomalar"), " / ", survey.title),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/diagnostics" }, "Diagnostika"), " / ", survey.title),
     h("div", { class: "card survey-head" }, h("h1", {}, survey.title), h("p", {}, survey.description), previous && h("div", { class: "alert alert-info" }, `Siz bu so'rovnomani ${fmtDate(previous.submittedAt)} da topshirgansiz. Qayta yuborsangiz, javoblaringiz yangilanadi.`)),
     h("div", { class: "survey-progress" }, counter, bar),
     questionEls,

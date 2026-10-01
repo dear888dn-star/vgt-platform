@@ -205,3 +205,13 @@ export const SEED_SURVEYS = [
     ],
   },
 ];
+
+// Asosiy diagnostika endi 1-ilova ("Kompleks diagnostik vositalar") orqali o'tkaziladi.
+// Quyidagi qo'shimcha so'rovnomalar saqlanadi, ammo standart holatda nofaol — o'qituvchi konstruktorda yoqishi mumkin.
+const SUPPLEMENTARY = new Set(["competence-pre", "knowledge-pre", "motivation", "competence-post", "knowledge-post"]);
+for (const s of SEED_SURVEYS) {
+  if (SUPPLEMENTARY.has(s.id)) {
+    s.active = false;
+    s.description = `[Qo'shimcha vosita] ${s.description}`;
+  }
+}
