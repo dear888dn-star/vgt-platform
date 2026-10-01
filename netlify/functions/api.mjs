@@ -11,7 +11,7 @@ import {
   hintPrompt,
   EVALUATION_SCHEMA,
 } from "../lib/scenarios.mjs";
-import { aiEnabled, streamText, completeText, MODEL } from "../lib/ai.mjs";
+import { aiEnabled, streamText, completeText, modelName, provider } from "../lib/ai.mjs";
 import { demoReply, demoEvaluation } from "../lib/demo.mjs";
 import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagnostics.mjs";
 import { ROUTE_RUBRIC, ROUTE_LEVELS, routeLevel } from "../lib/route-task.mjs";
@@ -405,6 +405,8 @@ async function overview(req) {
     selfStudySubmissions: submissions.length,
     ungraded: submissions.filter((s) => s.grade == null).length,
     aiEnabled: aiEnabled(),
+    aiProvider: provider(),
+    aiModel: modelName(),
     diag: {
       activeStage: settings.activeStage,
       records: diag.length,
@@ -597,7 +599,7 @@ async function trainerEvaluate(req) {
     durationSec: Number(b.durationSec) || 0,
     evaluation,
     total,
-    model: aiEnabled() ? MODEL : "demo",
+    model: modelName(),
     createdAt: new Date().toISOString(),
   };
   await db().set(`trainer/${user.id}/${session.id}`, session);

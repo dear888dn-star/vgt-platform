@@ -35,7 +35,7 @@ export function demoEvaluation(scenario, messages, meta) {
   return {
     scores,
     summary:
-      "Demo-rejimdagi avtomatik baholash: natija kalit so'zlar, javoblar hajmi va muloqot odobi ko'rsatkichlariga asoslangan. To'liq AI tahlili uchun administrator ANTHROPIC_API_KEY kalitini ulashi kerak.",
+      "Demo-rejimdagi avtomatik baholash: natija kalit so'zlar, javoblar hajmi va muloqot odobi ko'rsatkichlariga asoslangan. To'liq AI tahlili uchun administrator GEMINI_API_KEY yoki ANTHROPIC_API_KEY kalitini ulashi kerak.",
     standard: "Demo-rejimda kasb standarti talablariga moslik avtomatik tahlil qilinmaydi. Ssenariy brifingidagi mehnat funksiyalari ro'yxati bilan o'z harakatlaringizni solishtiring.",
     strengths: [
       student.length >= 4 ? "Suhbatda faol ishtirok etdingiz." : "Mashg'ulotni boshladingiz — bu birinchi qadam.",

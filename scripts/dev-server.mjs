@@ -49,6 +49,6 @@ http
   })
   .listen(PORT, () => {
     console.log(`VGT platformasi: http://localhost:${PORT}`);
-    console.log(`AI rejimi: ${process.env.ANTHROPIC_API_KEY ? "Claude API" : "demo (ANTHROPIC_API_KEY o'rnatilmagan)"}`);
+    console.log(`AI rejimi: ${process.env.ANTHROPIC_API_KEY ? "Claude API" : process.env.GEMINI_API_KEY ? "Google Gemini API" : "demo (AI kaliti o'rnatilmagan)"}`);
     console.log(`O'qituvchi kodi (lokal): ${process.env.TEACHER_CODE}`);
   });

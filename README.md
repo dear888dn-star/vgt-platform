@@ -33,7 +33,9 @@
    |---|---|---|
    | `JWT_SECRET` | ✅ | Uzun tasodifiy satr (masalan, 40+ belgi). Kirish tokenlarini imzolaydi. |
    | `TEACHER_CODE` | ✅ | O'qituvchi ro'yxatdan o'tishi uchun maxfiy kod. Faqat o'qituvchilarga bering. |
-   | `ANTHROPIC_API_KEY` | tavsiya | [console.anthropic.com](https://console.anthropic.com) dan olinadi. Bo'lmasa trenajyor demo-rejimda (oldindan yozilgan javoblar) ishlaydi. |
+   | `GEMINI_API_KEY` | tavsiya | Bepul Google Gemini API kaliti: [aistudio.google.com](https://aistudio.google.com) → Get API key. Trenajyor, ustoz maslahati va AI baholash shu orqali ishlaydi. |
+   | `GEMINI_MODEL` | yo'q | Standart: `gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest` — birinchi model band bo'lsa, keyingisi ishlatiladi. |
+   | `ANTHROPIC_API_KEY` | yo'q (pullik) | [console.anthropic.com](https://console.anthropic.com) dan olinadi. Agar o'rnatilsa, Gemini o'rniga Claude ishlatiladi. Hech qanday AI kaliti bo'lmasa, trenajyor demo-rejimda ishlaydi. |
    | `ANTHROPIC_MODEL` | yo'q | Standart: `claude-opus-5-5`. Tezroq va arzonroq javob uchun `claude-sonnet-5-5`. |
 
 4. **Deploy** tugmasini bosing. Har bir `git push` dan keyin sayt avtomatik yangilanadi.

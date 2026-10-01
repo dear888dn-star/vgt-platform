@@ -389,7 +389,8 @@ QOIDALAR:
 4. Agar o'quvchi faktik xato qilsa (sana, nom, raqam), personaj tabiiy ravishda shubha bildirishi yoki aniqlik so'rashi mumkin.
 5. Kvadrat qavsdagi [Vaziyat: ...] va [Bekat: ...] yozuvlari rejissyor ko'rsatmalari — ularni o'quvchi aytmagan; ularga personaj sifatida tabiiy reaksiya bildir.
 6. Mavzudan chetga chiquvchi yoki nojo'ya xabarlarga personaj sifatida hayron bo'lib javob ber va suhbatni vaziyatga qaytar.
-7. Vaziyat to'liq hal bo'lganda yoki ekskursiya mantiqan yakunlanganda, personajning so'nggi javobi oxirida alohida qatorda [[YAKUNLANDI]] belgisini qo'y.`;
+7. Faqat oddiy matn yoz: markdown belgilarini (*, **, #, _) ishlatma. Chet so'zlarni ham oddiy yoz.
+8. Vaziyat to'liq hal bo'lganda yoki ekskursiya mantiqan yakunlanganda, personajning so'nggi javobi oxirida alohida qatorda [[YAKUNLANDI]] belgisini qo'y.`;
 }
 
 export function evaluationPrompt(s, transcript, meta) {
@@ -441,5 +442,5 @@ VAZIYAT: ${s.title} — ${s.brief}
 O'quvchi roli: ${s.role}
 Maqsadlar: ${s.objectives.join("; ")}
 
-Suhbatning hozirgi holatiga qarab, o'quvchiga keyingi qadam uchun BITTA aniq, amaliy maslahat ber (2–3 jumla, o'zbek tilida). Tayyor javob matnini yozib berma — yo'nalish ko'rsat.`;
+Suhbatning hozirgi holatiga qarab, o'quvchiga keyingi qadam uchun BITTA aniq, amaliy maslahat ber (2–3 jumla, o'zbek tilida). Tayyor javob matnini yozib berma — yo'nalish ko'rsat. Faqat oddiy matn yoz, markdown belgilarini (*, **, #) ishlatma.`;
 }

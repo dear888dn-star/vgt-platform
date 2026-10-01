@@ -59,7 +59,7 @@ export async function renderList(el) {
         h("p", { class: "lead" }, "AI turist, mijoz yoki ekskursiya ishtirokchisi rolini o'ynaydi. Siz gid yoki turizm mutaxassisi sifatida real vaqt rejimida harakat qilasiz: savollarga javob berasiz, muammolarni hal qilasiz, kutilmagan hodisalarga moslashasiz. Yakunda 5 mezon bo'yicha 100 ballik baho va shaxsiy tavsiyalar olasiz.")),
       h("div", { class: "trainer-steps" }, ["1. Ssenariyni tanlang", "2. Vaziyat bilan tanishing", "3. Real vaqtda muloqot qiling", "4. AI bahosi va tavsiyalar"].map((s) => h("div", { class: "trainer-step" }, s)))
     ),
-    !aiEnabled && h("div", { class: "alert alert-warn" }, "⚠️ Trenajyor demo-rejimda ishlamoqda: AI kaliti ulanmagan, personaj javoblari oldindan yozilgan. To'liq rejim uchun administrator ANTHROPIC_API_KEY ni sozlashi kerak."),
+    !aiEnabled && h("div", { class: "alert alert-warn" }, "⚠️ Trenajyor demo-rejimda ishlamoqda: AI kaliti ulanmagan, personaj javoblari oldindan yozilgan. To'liq rejim uchun administrator GEMINI_API_KEY yoki ANTHROPIC_API_KEY ni sozlashi kerak."),
     filters,
     grid,
     h("h2", { class: "section-title" }, "📈 Mening natijalarim"),

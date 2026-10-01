@@ -47,7 +47,7 @@ async function overview(el) {
   const card = (icon, value, label, href) => h(href ? "a" : "div", { class: "card stat-card", href }, h("div", { class: "stat-icon" }, icon), h("b", {}, value), h("span", { class: "muted small" }, label));
   mount(
     el,
-    !o.aiEnabled && h("div", { class: "alert alert-warn" }, "⚠️ AI kaliti ulanmagan: trenajyor demo-rejimda. Netlify sozlamalarida ANTHROPIC_API_KEY o'zgaruvchisini qo'shing."),
+    !o.aiEnabled && h("div", { class: "alert alert-warn" }, "⚠️ AI kaliti ulanmagan: trenajyor demo-rejimda. Netlify sozlamalarida GEMINI_API_KEY (bepul) yoki ANTHROPIC_API_KEY o'zgaruvchisini qo'shing."),
     h(
       "div",
       { class: "grid cols-4" },
