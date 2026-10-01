@@ -46,9 +46,10 @@ export const session = {
 };
 
 async function request(method, path, data, { raw = false } = {}) {
-  const headers = { "content-type": "application/json" };
+  const binary = data instanceof Blob || data instanceof ArrayBuffer;
+  const headers = { "content-type": binary ? "application/octet-stream" : "application/json" };
   if (session.token) headers.authorization = `Bearer ${session.token}`;
-  const res = await fetch(`/api/${path}`, { method, headers, body: data === undefined ? undefined : JSON.stringify(data) });
+  const res = await fetch(`/api/${path}`, { method, headers, body: data === undefined ? undefined : binary ? data : JSON.stringify(data) });
   if (res.status === 401 && session.token && !path.startsWith("auth/")) {
     session.clear();
     location.hash = "#/login";
@@ -69,4 +70,6 @@ export const api = {
   put: (p, d) => request("PUT", p, d ?? {}),
   del: (p) => request("DELETE", p),
   stream: (p, d) => request("POST", p, d, { raw: true }),
+  putBinary: (p, blob) => request("PUT", p, blob),
+  raw: (p) => request("GET", p, undefined, { raw: true }),
 };

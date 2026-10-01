@@ -1,5 +1,6 @@
 import { h, mount, toast, progressBar } from "../ui.js";
-import { session } from "../api.js";
+import { api, session } from "../api.js";
+import { slideViewer } from "../slides.js";
 import { TOPICS, METHOD_INFO, COURSE, BOOK_INTRO, LITERATURE } from "../../data/topics.js";
 import { loadProgress, topicState, updateTopic, topicCompletion, setNote } from "../progress.js";
 import { renderMethod } from "../methods.js";
@@ -8,7 +9,8 @@ import { competencyChips } from "../competency.js";
 import { confetti, shake } from "../motion.js";
 
 export async function renderList(el) {
-  await loadProgress();
+  const [, slideList] = await Promise.all([loadProgress(), api.get("slides").catch(() => ({ slides: [] }))]);
+  const withSlides = new Set(slideList.slides.map((x) => x.topicId));
   const search = h("input", { type: "search", placeholder: "Mavzu yoki tushuncha bo'yicha qidirish...", class: "search" });
   const grid = h("div", { class: "grid cols-2" });
   const draw = () => {
@@ -20,7 +22,7 @@ export async function renderList(el) {
         return h(
           "a",
           { href: `#/topics/${t.id}`, class: "card topic-card tilt" },
-          h("div", { class: "topic-thumb-wrap" }, t.image ? h("img", { class: "topic-thumb", src: t.image, alt: "", loading: "lazy" }) : h("div", { class: "topic-thumb placeholder", "aria-hidden": "true" }, t.icon), h("span", { class: "num-badge" }, `${t.num}-mavzu`)),
+          h("div", { class: "topic-thumb-wrap" }, t.image ? h("img", { class: "topic-thumb", src: t.image, alt: "", loading: "lazy" }) : h("div", { class: "topic-thumb placeholder", "aria-hidden": "true" }, t.icon), h("span", { class: "num-badge" }, `${t.num}-mavzu`), withSlides.has(t.id) && h("span", { class: "slides-badge" }, "🖥️ Taqdimot")),
           h("div", { class: "topic-num" }, t.icon, h("span", {}, `${t.num}-mavzu`)),
           h("h3", {}, t.title),
           h("p", { class: "muted small clamp" }, t.goal),
@@ -45,6 +47,7 @@ export async function renderList(el) {
 }
 
 const CHAPTERS = [
+  ["slides", "🖥️", "Taqdimot"],
   ["theory", "📖", "Nazariya"],
   ["glossary", "🃏", "Tushunchalar"],
   ["methods", "🧠", "Interaktiv metodlar"],
@@ -64,7 +67,9 @@ export async function renderTopic(el, id) {
   const next = TOPICS[idx + 1];
   const words = topic.sections.reduce((n, s) => n + stripTags(s.html).split(/\s+/).filter(Boolean).length, 0);
   const minutes = Math.max(1, Math.round(words / 160));
-  const counts = { theory: topic.sections.length, glossary: topic.glossary.length, methods: topic.methods.length, questions: topic.questions.length, quiz: topic.quiz.length, self: topic.selfStudy.length };
+  const slides = await api.get(`slides/${topic.id}`).catch(() => null);
+  const viewer = slides && slideViewer(slides);
+  const counts = { slides: slides?.pages || (slides ? "▶" : 0), theory: topic.sections.length, glossary: topic.glossary.length, methods: topic.methods.length, questions: topic.questions.length, quiz: topic.quiz.length, self: topic.selfStudy.length };
 
   // Progress halqasi
   const ring = h("div", { class: "hero-ring", style: { "--p": 0 } }, h("b", {}, "0%"), h("span", {}, "bajarildi"));
@@ -79,6 +84,7 @@ export async function renderTopic(el, id) {
   const body = h(
     "div",
     { class: "lesson-body" },
+    viewer && chapter("slides", "🖥️", "Taqdimot", slides.kind === "pdf" ? `${slides.pages ? `${slides.pages} ta slayd · ` : ""}strelkalar, svayp yoki ⛶ to'liq ekran` : slides.title, viewer),
     chapter("theory", "📖", "Nazariya", `${topic.sections.length} bo'lim · ~${minutes} daqiqa o'qish`, theoryBlock(topic)),
     chapter("glossary", "🃏", "Tayanch tushunchalar", `${topic.glossary.length} ta tushuncha — kartani bosing`, glossaryTab(topic)),
     chapter("methods", "🧠", "Interaktiv metodlar", `${topic.methods.length} ta topshiriq`, methodsTab(topic)),
@@ -91,7 +97,7 @@ export async function renderTopic(el, id) {
     "nav",
     { class: "lesson-rail", "aria-label": "Dars bo'limlari" },
     h("div", { class: "rail-title" }, `${topic.num}-mavzu`),
-    CHAPTERS.map(([key, icon, label]) => [
+    CHAPTERS.filter(([key]) => key !== "slides" || viewer).map(([key, icon, label]) => [
       h("a", { href: `#learn-${key}`, "data-key": key, onclick: (e) => { e.preventDefault(); document.getElementById(`learn-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); } }, h("span", { class: "rail-icon" }, icon), h("span", { class: "rail-label" }, label), h("span", { class: "rail-count" }, counts[key])),
       key === "theory" && h("div", { class: "rail-sub" }, topic.sections.filter((x) => x.title).map((x, i) => h("a", { href: `#sec-${i}`, "data-sec": i, onclick: (e) => { e.preventDefault(); document.getElementById(`sec-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); } }, x.title.replace(/^\d+\.\d+\.\s*/, "")))),
     ])
@@ -115,7 +121,7 @@ export async function renderTopic(el, id) {
         h("h1", { class: "lesson-title" }, topic.title),
         h("p", { class: "lesson-goal" }, topic.goal),
         h("div", { class: "lesson-stats" },
-          [["📖", `${topic.sections.length} bo'lim`], ["⏱", `~${minutes} daq`], ["🃏", `${topic.glossary.length} tushuncha`], ["❓", `${topic.questions.length} savol`], ["✅", `${topic.quiz.length} test`]].map(([i, t]) => h("span", { class: "stat-pill" }, i, " ", t))),
+          [...(slides ? [["🖥️", slides.pages ? `${slides.pages} slayd` : "taqdimot"]] : []), ["📖", `${topic.sections.length} bo'lim`], ["⏱", `~${minutes} daq`], ["🃏", `${topic.glossary.length} tushuncha`], ["❓", `${topic.questions.length} savol`], ["✅", `${topic.quiz.length} test`]].map(([i, t]) => h("span", { class: "stat-pill" }, i, " ", t))),
         TOPIC_MAP[topic.id] && h("div", { class: "lesson-comps" }, competencyChips(TOPIC_MAP[topic.id]))
       ),
       ring
@@ -163,6 +169,7 @@ export async function renderTopic(el, id) {
     window.removeEventListener("scroll", onScroll);
     spy.disconnect();
     notesBtn.remove();
+    viewer?.destroy?.();
   };
 }
 

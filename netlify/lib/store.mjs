@@ -7,6 +7,7 @@ const STORE_NAME = "vgt";
 
 function fileStore(dir) {
   const file = (key) => path.join(dir, encodeURIComponent(key) + ".json");
+  const binFile = (key) => path.join(dir, encodeURIComponent(key) + ".bin");
   return {
     async get(key) {
       try {
@@ -22,6 +23,20 @@ function fileStore(dir) {
     },
     async del(key) {
       await fs.rm(file(key), { force: true });
+      await fs.rm(binFile(key), { force: true });
+    },
+    async getBinary(key) {
+      try {
+        const buf = await fs.readFile(binFile(key));
+        return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      } catch (e) {
+        if (e.code === "ENOENT") return null;
+        throw e;
+      }
+    },
+    async setBinary(key, data) {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(binFile(key), Buffer.from(data));
     },
     async list(prefix = "") {
       let names = [];
@@ -30,10 +45,8 @@ function fileStore(dir) {
       } catch {
         return [];
       }
-      return names
-        .filter((n) => n.endsWith(".json"))
-        .map((n) => decodeURIComponent(n.slice(0, -5)))
-        .filter((k) => k.startsWith(prefix));
+      const keys = names.filter((n) => /\.(json|bin)$/.test(n)).map((n) => decodeURIComponent(n.replace(/\.(json|bin)$/, "")));
+      return [...new Set(keys)].filter((k) => k.startsWith(prefix));
     },
   };
 }
@@ -47,6 +60,8 @@ function blobStore() {
     get: (key) => store.get(key, { type: "json" }),
     set: (key, value) => store.setJSON(key, value),
     del: (key) => store.delete(key),
+    getBinary: (key) => store.get(key, { type: "arrayBuffer" }),
+    setBinary: (key, data) => store.set(key, data),
     async list(prefix = "") {
       const { blobs } = await store.list({ prefix });
       return blobs.map((b) => b.key);

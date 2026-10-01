@@ -44,6 +44,28 @@ export function renderLogin(el) {
   mount(el, h("div", { class: "auth-wrap" }, form));
 }
 
+/** Tajriba (TG) yoki nazorat (NG) guruhini tanlash kartalari. */
+export function cohortPicker(name = "cohort") {
+  const options = [
+    ["experimental", "🧪", "Tajriba guruhi (TG)", "Platforma, virtual trenajyor va raqamli metodlar asosida o'qiyman."],
+    ["control", "📘", "Nazorat guruhi (NG)", "An'anaviy usulda o'qiyman, diagnostika va so'rovnomalarda qatnashaman."],
+  ];
+  const wrap = h(
+    "fieldset",
+    { class: "cohort-pick" },
+    h("legend", {}, "Siz qaysi guruhdasiz?"),
+    h("div", { class: "choice-cards" },
+      options.map(([value, icon, title, text]) =>
+        h("label", { class: "choice-card" },
+          h("input", { type: "radio", name, value, onchange: () => wrap.querySelectorAll(".choice-card").forEach((c) => c.classList.toggle("active", c.querySelector("input").checked)) }),
+          h("span", { class: "choice-icon" }, icon),
+          h("b", {}, title),
+          h("small", { class: "muted" }, text)))),
+    h("p", { class: "muted small" }, "Guruhingizni o'qituvchingizdan aniqlang. Keyinchalik uni faqat o'qituvchi o'zgartira oladi.")
+  );
+  return wrap;
+}
+
 export async function renderRegister(el) {
   if (session.user) return afterLogin();
   let config = { teacherSignup: false };
@@ -52,12 +74,17 @@ export async function renderRegister(el) {
   } catch {}
   const err = h("div");
   const teacherFields = h("div", { class: "hidden" }, field("O'qituvchi kodi", { name: "teacherCode", type: "password", autocomplete: "off" }), h("p", { class: "muted small" }, "Kodni platforma administratoridan oling."));
-  const studentFields = h("div", {}, field("Guruh", { name: "group", placeholder: "Masalan: GID-21", maxlength: 60 }));
+  const studentFields = h("div", {}, field("Guruh", { name: "group", placeholder: "Masalan: GID-21", maxlength: 60 }), cohortPicker());
   const form = h(
     "form",
     { class: "card auth-card", onsubmit: async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
+      if (fd.get("role") !== "teacher" && !fd.get("cohort")) {
+        err.replaceChildren(h("div", { class: "alert alert-error" }, "Tadqiqot guruhingizni tanlang: tajriba yoki nazorat guruhi"));
+        form.querySelector(".cohort-pick")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
       if (fd.get("password") !== fd.get("password2")) {
         err.replaceChildren(h("div", { class: "alert alert-error" }, "Parollar mos kelmadi"));
         return;
@@ -91,7 +118,8 @@ export async function renderRegister(el) {
       ),
     field("Ism-familiya", { name: "name", required: true, maxlength: 120, autocomplete: "name" }),
     field("Email", { name: "email", type: "email", required: true, autocomplete: "email" }),
-    field("Ta'lim muassasasi", { name: "college", placeholder: "Masalan: Samarqand turizm va madaniy meros texnikumi", maxlength: 160 }),
+    field("Ta'lim muassasasi (texnikum)", { name: "college", placeholder: "Masalan: Samarqand turizm va madaniy meros texnikumi", maxlength: 160, list: "college-list", autocomplete: "off" }),
+    h("datalist", { id: "college-list" }, (config.colleges || []).map((c) => h("option", { value: c }))),
     studentFields,
     teacherFields,
     h("div", { class: "grid cols-2" }, field("Parol", { name: "password", type: "password", required: true, minlength: 6, autocomplete: "new-password" }), field("Parolni takrorlang", { name: "password2", type: "password", required: true, minlength: 6, autocomplete: "new-password" })),

@@ -3,6 +3,7 @@ import { h, mount, toast, loading, fmtDate, modal, emptyState } from "../ui.js";
 import { api } from "../api.js";
 import { competencyChips } from "../competency.js";
 import { FUNCTIONS } from "../../data/standard.js";
+import { createVoice, voiceSupport } from "../voice.js";
 
 let cache = null;
 async function scenarios() {
@@ -153,9 +154,10 @@ function listCard(title, items, kind) {
 
 export async function renderSession(el, id) {
   mount(el, loading());
-  const { scenarios: list, criteria, aiEnabled } = await scenarios();
-  const s = list.find((x) => x.id === id);
-  if (!s) throw new Error("Ssenariy topilmadi");
+  const { scenarios: list, criteria, aiEnabled, voiceAI } = await scenarios();
+  const found = list.find((x) => x.id === id);
+  if (!found) throw new Error("Ssenariy topilmadi");
+  const s = { ...found, voiceAI };
 
   // Brifing ekrani
   mount(
@@ -182,12 +184,15 @@ export async function renderSession(el, id) {
       h("div", { class: "chips" }, criteria.map((c) => h("span", { class: "chip chip-soft" }, `${c.title} (${c.max})`))),
       h("div", { class: "alert alert-info" }, "Mashg'ulot davomida kutilmagan hodisalar yuz berishi mumkin. Vaqt real hisoblanadi. \"Ustoz maslahati\"dan foydalanish mumkin, ammo bu baholashda hisobga olinadi."),
       !aiEnabled && h("div", { class: "alert alert-warn" }, "Demo-rejim: personaj javoblari oldindan yozilgan."),
-      h("button", { class: "btn lg", onclick: () => startSession(el, s, criteria) }, "▶ Mashg'ulotni boshlash")
+      (voiceSupport.tts || voiceSupport.stt) && h("div", { class: "alert alert-info voice-tip" }, h("b", {}, "🎙 Ovozli rejim: "), "personaj javoblarini ovoz chiqarib o'qiydi, siz esa mikrofon orqali gapirib javob berasiz — xuddi real vaziyatdagidek. Eng tabiiy o'zbekcha ovoz va nutqni tanish uchun Google Chrome yoki Microsoft Edge brauzeridan foydalaning."),
+      h("div", { class: "row wrap" },
+        h("button", { class: "btn lg", onclick: () => startSession(el, s, criteria, false) }, "▶ Mashg'ulotni boshlash"),
+        (voiceSupport.tts || voiceSupport.stt) && h("button", { class: "btn lg ghost voice-start", onclick: () => startSession(el, s, criteria, true) }, "🎙 Ovozli rejimda boshlash"))
     )
   );
 }
 
-function startSession(el, s, criteria) {
+function startSession(el, s, criteria, voiceOn = false) {
   const history = []; // {role, content} — server uchun
   let hintsUsed = 0;
   let busy = false;
@@ -204,8 +209,103 @@ function startSession(el, s, criteria) {
   const stopsBox = h("div");
   const pendingEvents = [];
 
+  // ---------- Ovozli rejim ----------
+  const voice = voiceSupport.tts || voiceSupport.stt ? createVoice(s, { onState: drawVoice }) : null;
+  let voiceMode = Boolean(voice && voiceOn);
+  let lastNotice = "";
+  const orb = h("div", { class: "vo-orb", "aria-hidden": "true" }, h("i", { class: "r1" }), h("i", { class: "r2" }), h("i", { class: "r3" }), h("span", { class: "vo-face" }, s.icon));
+  const vStatus = h("div", { class: "vo-status", role: "status" }, "Ovozli rejim yoqildi");
+  const vHint = h("div", { class: "vo-hint muted small" });
+  const micBig = h("button", { class: "vo-mic", "aria-label": "Gapirish", onclick: () => toggleListen() }, h("span", {}, "🎙"));
+  const engineSel = h(
+    "select",
+    { "aria-label": "Ovoz manbai", onchange: () => voice.setEngine(engineSel.value) },
+    h("option", { value: "auto" }, "Ovoz: avtomatik"),
+    h("option", { value: "browser" }, "Brauzer ovozi"),
+    h("option", { value: "ai", disabled: !s.voiceAI }, `AI ovozi (Gemini)${s.voiceAI ? "" : " — sozlanmagan"}`)
+  );
+  const rateSel = h("select", { "aria-label": "Nutq tezligi", onchange: () => voice.setRate(Number(rateSel.value)) }, [0.85, 1, 1.15, 1.3].map((r) => h("option", { value: r }, `Tezlik ×${String(r).replace(".", ",")}`)));
+  const autoChk = h("input", { type: "checkbox", onchange: () => voice.setAutoListen(autoChk.checked) });
+  if (voice) {
+    engineSel.value = voice.state.engine;
+    rateSel.value = String(voice.state.rate);
+    autoChk.checked = voice.state.autoListen;
+  }
+  const voiceStage = h(
+    "div",
+    { class: "voice-stage" },
+    orb,
+    h("div", { class: "vo-main" }, vStatus, vHint, h("div", { class: "vo-controls" }, micBig, h("div", { class: "vo-settings" }, engineSel, rateSel, h("label", { class: "vo-check" }, autoChk, " Javobdan keyin avtomatik tinglash"))))
+  );
+  const voiceToggle = h("button", { class: "btn small ghost voice-toggle", "aria-pressed": "false", onclick: () => setVoiceMode(!voiceMode) }, "🎙 Ovozli rejim");
+
+  function drawVoice(st) {
+    voiceStage.classList.toggle("speaking", Boolean(st.speaking));
+    voiceStage.classList.toggle("listening", Boolean(st.listening));
+    voiceStage.style.setProperty("--lvl", (st.level || 0).toFixed(3));
+    micBtn.classList.toggle("rec", Boolean(st.listening));
+    micBtn.style.setProperty("--lvl", (st.level || 0).toFixed(3));
+    micBig.classList.toggle("rec", Boolean(st.listening));
+    if (st.speaking) vStatus.textContent = `🔊 ${st.speaker || "Turist"} gapirmoqda… (to'xtatib gapirish uchun mikrofonni bosing)`;
+    else if (st.listening) vStatus.textContent = "🎧 Sizni tinglayapman… gapiring";
+    else if (busy) vStatus.textContent = "💭 Javob tayyorlanmoqda…";
+    else if (!finished) vStatus.textContent = "Gapirish uchun mikrofon tugmasini bosing";
+    if (st.notice && st.notice !== lastNotice) {
+      lastNotice = st.notice;
+      toast(st.notice, "warn");
+    }
+  }
+
+  async function setVoiceMode(on) {
+    voiceMode = on && Boolean(voice);
+    voiceToggle.setAttribute("aria-pressed", String(voiceMode));
+    voiceToggle.classList.toggle("on", voiceMode);
+    voiceStage.classList.toggle("open", voiceMode);
+    if (!voiceMode) return voice?.stop();
+    const info = await voice.info();
+    vHint.textContent =
+      info.mode === "native"
+        ? `Ovoz: ${info.voice || "brauzer"}`
+        : info.mode === "turkish"
+          ? `Brauzeringizda o'zbekcha ovoz topilmadi — yaqin turkiy ovoz ishlatilmoqda${s.voiceAI ? "; tabiiyroq ovoz uchun “AI ovozi”ni tanlang" : ""}. Eng yaxshi o'zbekcha ovoz: Microsoft Edge.`
+          : `O'zbekcha ovoz topilmadi${s.voiceAI ? " — AI ovozi ishlatiladi" : ""}. Microsoft Edge brauzerida o'zbekcha ovozlar mavjud.`;
+    const lastBot = [...chat.querySelectorAll(".msg.bot .msg-text")].at(-1);
+    if (lastBot && !busy) speakThenListen(lastBot.textContent);
+  }
+
+  async function speakThenListen(text, thenListen = true) {
+    if (!voice) return;
+    await voice.speak(text);
+    if (thenListen && voiceMode && voice.state.autoListen && !finished && !busy) listenNow();
+  }
+
+  async function listenNow() {
+    if (!voice || finished || busy) return;
+    const before = input.value;
+    try {
+      const text = await voice.listen({ onText: (t) => (input.value = t) });
+      if (text) {
+        input.value = text;
+        if (voiceMode) send();
+      } else input.value = before;
+    } catch (err) {
+      input.value = before;
+      toast(err.message, "error");
+    }
+  }
+
+  function toggleListen() {
+    if (!voice) return;
+    if (voice.state.listening) return voice.stopListening();
+    voice.cancelSpeech();
+    listenNow();
+  }
+
+  const micBtn = h("button", { class: "btn ghost mic-btn", title: "Ovoz bilan yozish", "aria-label": "Ovoz bilan yozish", disabled: !voice || !voiceSupport.stt, onclick: () => toggleListen() }, "🎙");
+
   const addMsg = (cls, text, label) => {
-    const m = h("div", { class: `msg ${cls}` }, label && h("div", { class: "msg-label" }, label), h("div", { class: "msg-text" }, text));
+    const say = cls.startsWith("bot") && voice && h("button", { class: "msg-say", title: "Ovoz chiqarib o'qish", "aria-label": "Ovoz chiqarib o'qish", onclick: () => speakThenListen(m.querySelector(".msg-text").textContent, false) }, "🔊");
+    const m = h("div", { class: `msg ${cls}` }, label && h("div", { class: "msg-label" }, label, say), h("div", { class: "msg-text" }, text));
     chat.append(m);
     chat.scrollTop = chat.scrollHeight;
     return m.querySelector(".msg-text");
@@ -216,7 +316,7 @@ function startSession(el, s, criteria) {
     timer.textContent = `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
     timer.classList.toggle("over", sec > s.duration * 60);
   }, 1000);
-  window.addEventListener("hashchange", () => clearInterval(tick), { once: true });
+  window.addEventListener("hashchange", () => (clearInterval(tick), voice?.destroy()), { once: true });
 
   const drawStops = () => {
     if (!s.route) return;
@@ -238,6 +338,8 @@ function startSession(el, s, criteria) {
   async function send() {
     const text = input.value.trim();
     if (!text || busy || finished) return;
+    let spoken = "";
+    voice?.stop();
     busy = true;
     sendBtn.disabled = true;
     input.value = "";
@@ -283,6 +385,7 @@ function startSession(el, s, criteria) {
       reply = reply.replace("[[YAKUNLANDI]]", "").trim();
       target.textContent = reply;
       history.push({ role: "assistant", content: reply });
+      spoken = reply;
       if (ended) {
         addMsg("event", "✅ Vaziyat yakunlandi. Endi natijani baholashingiz mumkin.");
         finishBtn.classList.add("pulse");
@@ -290,7 +393,8 @@ function startSession(el, s, criteria) {
     }
     busy = false;
     sendBtn.disabled = false;
-    input.focus();
+    if (voiceMode && spoken) speakThenListen(spoken);
+    else input.focus();
   }
 
   input.addEventListener("keydown", (e) => {
@@ -318,6 +422,7 @@ function startSession(el, s, criteria) {
     if (busy) return;
     if (history.filter((m) => m.role === "user").length < 2) return toast("Baholash uchun kamida 2 ta javob yozing", "warn");
     finished = true;
+    voice?.stop();
     clearInterval(tick);
     finishBtn.disabled = true;
     input.disabled = true;
@@ -340,11 +445,12 @@ function startSession(el, s, criteria) {
 
   mount(
     el,
-    h("div", { class: "row between session-head" }, h("div", {}, h("div", { class: "eyebrow" }, s.category), h("h2", {}, s.icon, " ", s.title)), h("div", { class: "row" }, timer, turnInfo)),
+    h("div", { class: "row between session-head" }, h("div", {}, h("div", { class: "eyebrow" }, s.category), h("h2", {}, s.icon, " ", s.title)), h("div", { class: "row" }, voice && voiceToggle, timer, turnInfo)),
+    voice && voiceStage,
     h(
       "div",
       { class: "session-layout" },
-      h("div", { class: "card chat-card" }, chat, h("div", { class: "composer" }, input, sendBtn)),
+      h("div", { class: "card chat-card" }, chat, h("div", { class: "composer" }, input, voice && micBtn, sendBtn)),
       h(
         "aside",
         { class: "stack session-side" },
@@ -358,9 +464,11 @@ function startSession(el, s, criteria) {
       )
     )
   );
+  window.scrollTo({ top: 0, behavior: "instant" });
   addMsg("event", `🎬 Mashg'ulot boshlandi. ${s.role}`);
   addMsg("bot", s.opening, "Turist");
-  input.focus();
+  if (voiceMode) setVoiceMode(true);
+  else input.focus();
 }
 
 function showResult(el, s, session, criteria) {

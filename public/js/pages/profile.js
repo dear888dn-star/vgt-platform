@@ -1,5 +1,6 @@
 import { h, mount, toast } from "../ui.js";
 import { api, session } from "../api.js";
+import { cohortPicker } from "./auth.js";
 
 const COHORT = { experimental: "Tajriba guruhi", control: "Nazorat guruhi", unassigned: "Belgilanmagan" };
 
@@ -25,6 +26,7 @@ export async function render(el) {
     h("label", { class: "field" }, h("span", {}, "Ism-familiya"), h("input", { name: "name", value: user.name, required: true })),
     h("label", { class: "field" }, h("span", {}, "Ta'lim muassasasi"), h("input", { name: "college", value: user.college || "" })),
     user.role === "student" && h("label", { class: "field" }, h("span", {}, "Guruh"), h("input", { name: "group", value: user.group || "" })),
+    user.role === "student" && (user.cohort || "unassigned") === "unassigned" && cohortPicker(),
     h("h3", {}, "Parolni o'zgartirish"),
     h("div", { class: "grid cols-2" },
       h("label", { class: "field" }, h("span", {}, "Joriy parol"), h("input", { name: "password", type: "password", autocomplete: "current-password" })),

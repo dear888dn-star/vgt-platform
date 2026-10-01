@@ -352,10 +352,25 @@ export const SCENARIOS = [
   },
 ];
 
+// Ovozli rejim uchun personajlarning ovozi (f — ayol, m — erkak). Birinchisi — asosiy so'zlovchi.
+const SPEAKERS = {
+  "registon-tour": { Klaus: "m", Anna: "f", Lukas: "m" },
+  "lost-tourist": { Marko: "m" },
+  overbooking: { Dilnoza: "f" },
+  "double-payment": { Javohir: "m" },
+  "khiva-virtual": { "Gulnora opa": "f", Sardor: "m", Madina: "f" },
+  "foreign-arrival": { Emily: "f" },
+  "negative-review": { Rustam: "m" },
+  "accessible-tour": { Nodira: "f" },
+  "itinerary-design": { Malika: "f", Aziz: "m" },
+  "heat-emergency": { Helga: "f", Pyotr: "m", Herbert: "m" },
+};
+
 export function publicScenario(s) {
   // Talabaga persona tafsilotlari emas, faqat vaziyat ko'rsatiladi.
   const { persona, keywords, fallback, ...rest } = s;
-  return { ...rest, competencies: SCENARIO_MAP[s.id]?.kk || [], functions: SCENARIO_MAP[s.id]?.functions || [] };
+  const speakers = Object.fromEntries(Object.entries(SPEAKERS[s.id] || {}).map(([k, v]) => [k, v === "m" ? "male" : "female"]));
+  return { ...rest, speakers, competencies: SCENARIO_MAP[s.id]?.kk || [], functions: SCENARIO_MAP[s.id]?.functions || [] };
 }
 
 /** Ssenariyga tegishli kasb standarti talablari (baholash uchun). */

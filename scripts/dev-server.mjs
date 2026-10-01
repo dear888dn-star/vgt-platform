@@ -19,7 +19,7 @@ process.env.TEACHER_CODE ||= "ustoz-local";
 
 const { default: api } = await import("../netlify/functions/api.mjs");
 const PORT = Number(process.env.PORT) || 8888;
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".json": "application/json", ".ico": "image/x-icon", ".webp": "image/webp" };
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".pdf": "application/pdf", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".json": "application/json", ".ico": "image/x-icon", ".webp": "image/webp" };
 
 http
   .createServer(async (req, res) => {

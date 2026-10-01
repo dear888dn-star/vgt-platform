@@ -175,3 +175,86 @@ export async function completeText({ system, messages, maxTokens = 1000, effort 
   const opts = { system, messages, maxTokens, effort, format };
   return provider() === "gemini" ? geminiComplete(opts) : claudeComplete(opts);
 }
+
+// ---------------- Ovoz: nutq sintezi (TTS) va nutqni matnga aylantirish (STT) — Gemini ----------------
+// Trenajyorning ovozli rejimi asosan brauzerning o'z ovozidan foydalanadi; GEMINI_API_KEY bo'lsa,
+// AI ovozi (tabiiyroq) va brauzerda nutqni tanish bo'lmaganda server orqali tanish ishlaydi.
+
+const TTS_MODELS = (process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts,gemini-2.5-flash-tts")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+const VOICES = { female: ["Kore", "Aoede", "Leda", "Zephyr"], male: ["Charon", "Puck", "Orus", "Fenrir"] };
+
+export const voiceEnabled = () => Boolean(process.env.GEMINI_API_KEY);
+
+async function geminiRaw(models, body) {
+  let last;
+  for (const model of models) {
+    const res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return res.json();
+    last = res;
+    console.error(`Gemini (${model}) ovoz xatosi ${res.status}:`, (await res.text().catch(() => "")).slice(0, 300));
+    if (!RETRYABLE.has(res.status)) break;
+  }
+  const err = new Error(errorMessage(last?.status));
+  err.status = last?.status || 502;
+  throw err;
+}
+
+/** 16-bit PCM (mono) ma'lumotiga WAV sarlavhasini qo'shadi. */
+function pcmToWav(pcm, sampleRate = 24000) {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+/**
+ * Matnni ovozga aylantiradi. segments: [{ speaker, gender, text }]. Ikki va undan kam so'zlovchi bo'lsa,
+ * har biri o'z ovozi bilan gapiradi. WAV (Buffer) qaytaradi.
+ */
+export async function synthesizeSpeech(segments, { language = "o'zbek" } = {}) {
+  const speakers = [...new Map(segments.map((s) => [s.speaker || "Turist", s.gender || "female"])).entries()];
+  const used = { female: 0, male: 0 };
+  const voiceOf = Object.fromEntries(speakers.map(([name, g]) => [name, VOICES[g][used[g]++ % VOICES[g].length]]));
+  const lang = language === "ingliz" ? "English" : "Uzbek (Latin script)";
+  const multi = speakers.length === 2;
+  const text = multi
+    ? `Read this ${lang} dialogue naturally, with emotion that matches the situation:\n${segments.map((s) => `${s.speaker}: ${s.text}`).join("\n")}`
+    : `Read aloud in ${lang}, naturally and expressively:\n${segments.map((s) => s.text).join(" ")}`;
+  const speechConfig = multi
+    ? { multiSpeakerVoiceConfig: { speakerVoiceConfigs: speakers.map(([name]) => ({ speaker: name, voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceOf[name] } } })) } }
+    : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceOf[speakers[0]?.[0]] || "Kore" } } };
+  const data = await geminiRaw(TTS_MODELS, { contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig } });
+  const part = (data?.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData?.data);
+  if (!part) throw Object.assign(new Error("Ovoz yaratilmadi"), { status: 502 });
+  const rate = Number(/rate=(\d+)/.exec(part.inlineData.mimeType || "")?.[1]) || 24000;
+  const pcm = Buffer.from(part.inlineData.data, "base64");
+  return /wav|mpeg|ogg/.test(part.inlineData.mimeType || "") ? pcm : pcmToWav(pcm, rate);
+}
+
+/** Yozib olingan nutqni matnga aylantiradi (brauzerda nutqni tanish imkoni bo'lmaganda). */
+export async function transcribeAudio(base64, mimeType, { language = "o'zbek" } = {}) {
+  const lang = language === "ingliz" ? "English" : "Uzbek (write in Uzbek Latin script)";
+  const data = await geminiRaw(GEMINI_MODELS, {
+    contents: [{ parts: [{ inlineData: { mimeType, data: base64 } }, { text: `Transcribe this speech exactly as spoken. Language: ${lang}. Return only the transcript text, without quotes or comments. If there is no speech, return an empty string.` }] }],
+    generationConfig: { maxOutputTokens: 800 },
+  });
+  return partsText(data).trim();
+}

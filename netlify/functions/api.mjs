@@ -12,7 +12,7 @@ import {
   hintPrompt,
   EVALUATION_SCHEMA,
 } from "../lib/scenarios.mjs";
-import { aiEnabled, streamText, completeText, modelName, provider } from "../lib/ai.mjs";
+import { aiEnabled, streamText, completeText, modelName, provider, voiceEnabled, synthesizeSpeech, transcribeAudio } from "../lib/ai.mjs";
 import { demoReply, demoEvaluation } from "../lib/demo.mjs";
 import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagnostics.mjs";
 import { ROUTE_RUBRIC, ROUTE_LEVELS, routeLevel } from "../lib/route-task.mjs";
@@ -86,6 +86,7 @@ async function register(req) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, "Email noto'g'ri kiritilgan");
   if (password.length < 6) throw new HttpError(400, "Parol kamida 6 belgidan iborat bo'lishi kerak");
   if (!name) throw new HttpError(400, "Ism-familiyani kiriting");
+  if (role === "student" && !["experimental", "control"].includes(b.cohort)) throw new HttpError(400, "Tadqiqot guruhingizni tanlang: tajriba yoki nazorat guruhi");
   if (role === "teacher") {
     const code = process.env.TEACHER_CODE;
     if (!code) throw new HttpError(403, "O'qituvchi ro'yxatdan o'tishi hali sozlanmagan (TEACHER_CODE)");
@@ -101,7 +102,8 @@ async function register(req) {
     role,
     group: str(b.group, 60),
     college: str(b.college, 160),
-    cohort: role === "student" ? "unassigned" : undefined,
+    cohort: role === "student" ? (["experimental", "control"].includes(b.cohort) ? b.cohort : "unassigned") : undefined,
+    cohortSource: role === "student" && ["experimental", "control"].includes(b.cohort) ? "self" : undefined,
     createdAt: new Date().toISOString(),
     ...(await hashPassword(password)),
   };
@@ -128,6 +130,11 @@ async function updateMe(req) {
   if (b.name !== undefined) user.name = str(b.name, 120) || user.name;
   if (b.group !== undefined) user.group = str(b.group, 60);
   if (b.college !== undefined) user.college = str(b.college, 160);
+  // O'quvchi guruhini faqat hali belgilanmagan bo'lsa o'zi tanlaydi; keyin uni o'qituvchi o'zgartiradi.
+  if (user.role === "student" && (user.cohort || "unassigned") === "unassigned" && ["experimental", "control"].includes(b.cohort)) {
+    user.cohort = b.cohort;
+    user.cohortSource = "self";
+  }
   if (b.newPassword) {
     if (!(await verifyPassword(String(b.password || ""), user.salt, user.hash))) throw new HttpError(400, "Joriy parol noto'g'ri");
     if (String(b.newPassword).length < 6) throw new HttpError(400, "Yangi parol kamida 6 belgi bo'lsin");
@@ -372,7 +379,10 @@ async function updateStudent(req, id) {
   const user = await db().get(userKey(id));
   if (!user) throw new HttpError(404, "Foydalanuvchi topilmadi");
   const b = await body(req);
-  if (["experimental", "control", "unassigned"].includes(b.cohort)) user.cohort = b.cohort;
+  if (["experimental", "control", "unassigned"].includes(b.cohort) && b.cohort !== user.cohort) {
+    user.cohort = b.cohort;
+    user.cohortSource = "teacher";
+  }
   if (b.group !== undefined) user.group = str(b.group, 60);
   await db().set(userKey(id), user);
   return json(publicUser(user));
@@ -521,6 +531,42 @@ const withOpening = (s, history) => [
 
 function transcriptOf(s, history) {
   return [`TURIST/PERSONAJ: ${s.opening}`, ...history.map((m) => `${m.role === "user" ? "GID (o'quvchi)" : "TURIST/PERSONAJ"}: ${m.content}`)].join("\n\n");
+}
+
+// ---------- Ovozli rejim ----------
+
+async function trainerTts(req) {
+  await requireUser(req);
+  if (!voiceEnabled()) throw new HttpError(503, "AI ovozi sozlanmagan (GEMINI_API_KEY)");
+  const b = await body(req);
+  const s = findScenario(b.scenarioId);
+  const segments = (Array.isArray(b.segments) ? b.segments : [])
+    .slice(0, 8)
+    .map((x) => ({ speaker: str(x?.speaker, 40) || "Turist", gender: x?.gender === "male" ? "male" : "female", text: str(x?.text, 1200) }))
+    .filter((x) => x.text);
+  if (!segments.length) throw new HttpError(400, "Matn bo'sh");
+  if (segments.reduce((n, x) => n + x.text.length, 0) > 2400) throw new HttpError(400, "Matn juda uzun");
+  try {
+    const wav = await synthesizeSpeech(segments, { language: s.language });
+    return new Response(wav, { headers: { "content-type": "audio/wav", "cache-control": "no-store" } });
+  } catch (err) {
+    throw new HttpError(err.status === 429 ? 429 : 502, err.status === 429 ? "AI ovozi uchun kunlik bepul limit tugadi — brauzer ovozi ishlatiladi" : "AI ovozini yaratib bo'lmadi");
+  }
+}
+
+async function trainerTranscribe(req) {
+  await requireUser(req);
+  if (!voiceEnabled()) throw new HttpError(503, "Nutqni tanish sozlanmagan (GEMINI_API_KEY)");
+  const b = await body(req);
+  const s = findScenario(b.scenarioId);
+  const audio = typeof b.audio === "string" ? b.audio : "";
+  const mime = /^audio\/[\w.+-]+(;.*)?$/.test(String(b.mime)) ? String(b.mime).split(";")[0] : "audio/webm";
+  if (!audio || audio.length > 4_000_000) throw new HttpError(400, "Audio yozuv bo'sh yoki juda uzun (eng ko'pi ~2 daqiqa)");
+  try {
+    return json({ text: await transcribeAudio(audio, mime, { language: s.language }) });
+  } catch (err) {
+    throw new HttpError(err.status === 429 ? 429 : 502, err.status === 429 ? "So'rovlar limiti tugadi, birozdan so'ng urinib ko'ring" : "Nutqni tanib bo'lmadi");
+  }
 }
 
 async function trainerChat(req) {
@@ -932,6 +978,222 @@ async function health() {
   return json(checks, checks.blobs === "ishlayapti" ? 200 : 500);
 }
 
+// ---------- Mavzu taqdimotlari (slaydlar) ----------
+// Fayl 3 MB li bo'laklarda yuklanadi va saqlanadi: Netlify funksiyasining so'rov/javob chegarasi (6 MB) oshmaydi.
+
+const SLIDE_CHUNK = 3 * 1024 * 1024;
+const SLIDE_LIMITS = { pdf: 60 * 1024 * 1024, pptx: 20 * 1024 * 1024 };
+const slideKey = (topicId) => `slides/${topicId}`;
+const slideBin = (topicId, uploadId, i) => `slidebin/${topicId}/${uploadId}/${i}`;
+const topicIdOk = (id) => /^[\w-]{1,40}$/.test(id);
+
+function slideKind(name, mime) {
+  if (/\.pdf$/i.test(name) || mime === "application/pdf") return "pdf";
+  if (/\.pptx$/i.test(name) || mime === "application/vnd.openxmlformats-officedocument.presentationml.presentation") return "pptx";
+  return null;
+}
+
+/** Google Slides, Canva, OneDrive/PowerPoint Online havolalarini joylashtiriladigan ko'rinishga keltiradi. */
+function embedUrlFor(url) {
+  const u = new URL(url);
+  const g = url.match(/docs\.google\.com\/presentation\/d\/(e\/)?([\w-]+)/);
+  if (g) return g[1] ? `https://docs.google.com/presentation/d/e/${g[2]}/embed?start=false&loop=false&delayms=5000` : `https://docs.google.com/presentation/d/${g[2]}/embed?start=false&loop=false&delayms=5000`;
+  if (/canva\.com$/.test(u.hostname) || u.hostname.endsWith(".canva.com")) {
+    const m = url.match(/canva\.com\/design\/([\w-]+)\/([\w-]+)/);
+    if (m) return `https://www.canva.com/design/${m[1]}/${m[2]}/view?embed`;
+  }
+  return url;
+}
+
+async function listSlides() {
+  const items = await getMany("slides/");
+  return json({ slides: items.map(({ by, ...rest }) => rest) });
+}
+
+async function getSlides(req, topicId) {
+  const meta = await db().get(slideKey(topicId));
+  if (!meta) throw new HttpError(404, "Bu mavzu uchun taqdimot joylanmagan");
+  const { by, ...rest } = meta;
+  return json(rest);
+}
+
+async function slideChunk(req, topicId, uploadId, i) {
+  const meta = await db().get(slideKey(topicId));
+  if (!meta || meta.uploadId !== uploadId || Number(i) >= meta.chunks) throw new HttpError(404, "Fayl topilmadi");
+  const data = await db().getBinary(slideBin(topicId, uploadId, i));
+  if (!data) throw new HttpError(404, "Fayl bo'lagi topilmadi");
+  return new Response(data, { headers: { "content-type": "application/octet-stream", "cache-control": "public, max-age=31536000, immutable" } });
+}
+
+/** To'liq fayl (PowerPoint Online ko'ruvchisi va yuklab olish uchun) — oqim bilan uzatiladi. */
+async function slideFile(req, topicId) {
+  const meta = await db().get(slideKey(topicId));
+  if (!meta || meta.kind === "link") throw new HttpError(404, "Fayl topilmadi");
+  const store = db();
+  let i = 0;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      if (i >= meta.chunks) return controller.close();
+      const part = await store.getBinary(slideBin(topicId, meta.uploadId, i++));
+      if (!part) return controller.error(new Error("Fayl bo'lagi topilmadi"));
+      controller.enqueue(new Uint8Array(part));
+    },
+  });
+  const type = meta.kind === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  const ascii = meta.name.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+  return new Response(stream, {
+    headers: {
+      "content-type": type,
+      "content-length": String(meta.size),
+      "content-disposition": `${new URL(req.url).searchParams.has("download") ? "attachment" : "inline"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+      "cache-control": "public, max-age=300",
+    },
+  });
+}
+
+async function slidesInit(req, topicId) {
+  await requireTeacher(req);
+  if (!topicIdOk(topicId)) throw new HttpError(400, "Mavzu noto'g'ri");
+  const b = await body(req);
+  const name = str(b.name, 200);
+  const size = Number(b.size);
+  const kind = slideKind(name, b.mime);
+  if (!kind) throw new HttpError(400, "Faqat PDF (.pdf) yoki PowerPoint (.pptx) fayl yuklash mumkin");
+  if (!Number.isFinite(size) || size <= 0) throw new HttpError(400, "Fayl bo'sh");
+  if (size > SLIDE_LIMITS[kind]) throw new HttpError(413, `Fayl juda katta: ${kind.toUpperCase()} uchun eng ko'pi ${SLIDE_LIMITS[kind] / 1024 / 1024} MB`);
+  return json({ uploadId: newId(), chunkSize: SLIDE_CHUNK, chunks: Math.ceil(size / SLIDE_CHUNK), kind });
+}
+
+async function slidesPutChunk(req, topicId, uploadId, i) {
+  await requireTeacher(req);
+  if (!topicIdOk(topicId) || !/^[\w-]{6,64}$/.test(uploadId) || !/^\d{1,3}$/.test(i)) throw new HttpError(400, "So'rov noto'g'ri");
+  const data = await req.arrayBuffer();
+  if (!data.byteLength || data.byteLength > SLIDE_CHUNK) throw new HttpError(400, "Fayl bo'lagi hajmi noto'g'ri");
+  await db().setBinary(slideBin(topicId, uploadId, i), data);
+  return json({ ok: true, size: data.byteLength });
+}
+
+async function deleteSlideFiles(meta) {
+  if (!meta?.uploadId) return;
+  const keys = await db().list(`slidebin/${meta.topicId}/${meta.uploadId}/`);
+  await Promise.all(keys.map((k) => db().del(k)));
+}
+
+async function slidesCommit(req, topicId) {
+  const teacher = await requireTeacher(req);
+  const b = await body(req);
+  const name = str(b.name, 200);
+  const size = Number(b.size);
+  const kind = slideKind(name, b.mime);
+  const uploadId = str(b.uploadId, 64);
+  if (!topicIdOk(topicId) || !kind || !uploadId) throw new HttpError(400, "So'rov noto'g'ri");
+  const chunks = Math.ceil(size / SLIDE_CHUNK);
+  const keys = new Set(await db().list(`slidebin/${topicId}/${uploadId}/`));
+  for (let i = 0; i < chunks; i++) if (!keys.has(slideBin(topicId, uploadId, i))) throw new HttpError(400, `Fayl to'liq yuklanmadi (${i + 1}-bo'lak yo'q). Qayta urinib ko'ring.`);
+  const old = await db().get(slideKey(topicId));
+  const meta = {
+    topicId, kind, name, size, chunks, uploadId,
+    title: str(b.title, 200) || name.replace(/\.(pdf|pptx)$/i, ""),
+    pages: Number.isInteger(b.pages) && b.pages > 0 ? b.pages : undefined,
+    uploadedAt: new Date().toISOString(),
+    by: teacher.name,
+  };
+  await db().set(slideKey(topicId), meta);
+  if (old && old.uploadId !== uploadId) await deleteSlideFiles(old);
+  return json(meta);
+}
+
+async function slidesLink(req, topicId) {
+  const teacher = await requireTeacher(req);
+  if (!topicIdOk(topicId)) throw new HttpError(400, "Mavzu noto'g'ri");
+  const b = await body(req);
+  const url = str(b.url, 1000);
+  if (!/^https:\/\//i.test(url)) throw new HttpError(400, "Havola https:// bilan boshlanishi kerak");
+  let embed;
+  try {
+    embed = embedUrlFor(url);
+  } catch {
+    throw new HttpError(400, "Havola noto'g'ri");
+  }
+  const old = await db().get(slideKey(topicId));
+  const meta = { topicId, kind: "link", url, embedUrl: embed, title: str(b.title, 200) || "Taqdimot", uploadedAt: new Date().toISOString(), by: teacher.name };
+  await db().set(slideKey(topicId), meta);
+  if (old) await deleteSlideFiles(old);
+  return json(meta);
+}
+
+async function slidesDelete(req, topicId) {
+  await requireTeacher(req);
+  const old = await db().get(slideKey(topicId));
+  if (old) {
+    await deleteSlideFiles(old);
+    await db().del(slideKey(topicId));
+  }
+  return json({ ok: true });
+}
+
+// ---------- Ommaviy natijalar (texnikumlar kesimida) ----------
+
+const normCollege = (name) => String(name || "").toLowerCase().replace(/[‘’ʻʼ`´]/g, "'").replace(/\s+/g, " ").trim();
+const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
+const round2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
+let publicCache = { at: 0, data: null };
+
+/** Faqat umumlashtirilgan ko'rsatkichlar: shaxsiy ma'lumotlar chiqmaydi. 60 soniya keshlanadi. */
+async function publicSnapshot() {
+  if (publicCache.data && Date.now() - publicCache.at < 60_000) return publicCache.data;
+  const [users, records] = await Promise.all([getMany("user/"), getMany("diag/")]);
+  const students = users.filter((u) => u.role === "student");
+  const groups = new Map();
+  const groupOf = (u) => {
+    const key = normCollege(u.college) || "—";
+    if (!groups.has(key)) groups.set(key, { key, spellings: new Map(), students: 0, recs: [] });
+    const g = groups.get(key);
+    const label = String(u.college || "").trim() || "Muassasa ko'rsatilmagan";
+    g.spellings.set(label, (g.spellings.get(label) || 0) + 1);
+    return g;
+  };
+  const byId = new Map();
+  for (const u of students) {
+    const g = groupOf(u);
+    g.students++;
+    byId.set(u.id, g);
+  }
+  for (const r of records) byId.get(r.userId)?.recs.push(r);
+
+  const summarize = (recs) =>
+    Object.fromEntries(
+      Object.keys(STAGES).map((st) => {
+        const list = recs.filter((r) => r.stage === st).map((r) => r.result || computeResult(r));
+        const pick = (k) => list.map((x) => x[k]).filter((v) => Number.isFinite(v));
+        const complete = list.filter((x) => Number.isFinite(x.B));
+        const levels = { Past: 0, "O'rta": 0, Yuqori: 0 };
+        for (const x of complete) levels[x.level]++;
+        return [st, { n: list.length, complete: complete.length, B: round2(mean(pick("B"))), M: round2(mean(pick("Mavg"))), T: round2(mean(pick("Tpct"))), levels }];
+      })
+    );
+
+  const colleges = [...groups.values()]
+    .map((g) => ({ name: [...g.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0], students: g.students, stages: summarize(g.recs) }))
+    .sort((a, b) => b.students - a.students);
+  const data = {
+    updatedAt: new Date().toISOString(),
+    stages: STAGES,
+    total: { name: "Barcha texnikumlar", students: students.length, stages: summarize(records.filter((r) => byId.has(r.userId))) },
+    colleges,
+  };
+  publicCache = { at: Date.now(), data };
+  return data;
+}
+
+async function knownColleges() {
+  try {
+    return (await publicSnapshot()).colleges.filter((c) => c.name !== "Muassasa ko'rsatilmagan").map((c) => c.name).slice(0, 50);
+  } catch {
+    return [];
+  }
+}
+
 // ---------- Router ----------
 
 const routes = [
@@ -940,7 +1202,18 @@ const routes = [
   ["GET", /^me$/, async (req) => json(publicUser(await requireUser(req)))],
   ["PUT", /^me$/, updateMe],
   ["GET", /^health$/, health],
-  ["GET", /^config$/, async () => json({ aiEnabled: aiEnabled(), teacherSignup: Boolean(process.env.TEACHER_CODE) })],
+  ["GET", /^public\/results$/, async () => json(await publicSnapshot())],
+  ["GET", /^config$/, async () => json({ aiEnabled: aiEnabled(), teacherSignup: Boolean(process.env.TEACHER_CODE), colleges: await knownColleges() })],
+
+  ["GET", /^slides$/, listSlides],
+  ["GET", /^slides\/([\w-]+)$/, getSlides],
+  ["GET", /^slides\/([\w-]+)\/file$/, slideFile],
+  ["GET", /^slides\/([\w-]+)\/chunk\/([\w-]+)\/(\d+)$/, slideChunk],
+  ["POST", /^admin\/slides\/([\w-]+)\/init$/, slidesInit],
+  ["PUT", /^admin\/slides\/([\w-]+)\/chunk\/([\w-]+)\/(\d+)$/, slidesPutChunk],
+  ["POST", /^admin\/slides\/([\w-]+)\/commit$/, slidesCommit],
+  ["PUT", /^admin\/slides\/([\w-]+)\/link$/, slidesLink],
+  ["DELETE", /^admin\/slides\/([\w-]+)$/, slidesDelete],
 
   ["GET", /^surveys$/, listSurveys],
   ["GET", /^surveys\/([\w-]+)$/, getSurvey],
@@ -951,8 +1224,10 @@ const routes = [
   ["GET", /^self-study$/, mySelfStudy],
   ["POST", /^self-study\/([\w-]+)$/, submitSelfStudy],
 
-  ["GET", /^trainer\/scenarios$/, async () => json({ scenarios: SCENARIOS.map(publicScenario), criteria: CRITERIA, aiEnabled: aiEnabled() })],
+  ["GET", /^trainer\/scenarios$/, async () => json({ scenarios: SCENARIOS.map(publicScenario), criteria: CRITERIA, aiEnabled: aiEnabled(), voiceAI: voiceEnabled() })],
   ["POST", /^trainer\/chat$/, trainerChat],
+  ["POST", /^trainer\/tts$/, trainerTts],
+  ["POST", /^trainer\/transcribe$/, trainerTranscribe],
   ["POST", /^trainer\/hint$/, trainerHint],
   ["POST", /^trainer\/evaluate$/, trainerEvaluate],
   ["GET", /^trainer\/sessions$/, mySessions],

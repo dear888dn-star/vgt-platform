@@ -2,6 +2,7 @@
 import { h, mount, errorBox } from "./ui.js";
 import { session } from "./api.js";
 import { watch, transition, initTopbar } from "./motion.js";
+import { initResultsBoard } from "./results-board.js";
 import * as home from "./pages/home.js";
 import * as auth from "./pages/auth.js";
 import * as topics from "./pages/topics.js";
@@ -109,5 +110,6 @@ window.addEventListener("vgt:auth", renderNav);
 document.getElementById("year").textContent = new Date().getFullYear();
 main.setAttribute("tabindex", "-1");
 initTopbar();
+initResultsBoard();
 watch(main);
 route();

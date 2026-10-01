@@ -8,6 +8,8 @@ import { showSession, scoreClass } from "./trainer.js";
 import { resultSheet } from "./diagnostics.js";
 import { projectSummary, gradeCard } from "./route-lab.js";
 import { mapFromEvidence, competencyTable } from "../competency.js";
+import { TOPICS } from "../../data/topics.js";
+import { slideViewer, uploadSlides, fmtSize } from "../slides.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
@@ -20,6 +22,7 @@ const TABS = [
   ["results", "📈 So'rovnoma natijalari"],
   ["experiment", "📐 So'rovnomalar tahlili"],
   ["builder", "🛠 So'rovnoma konstruktori"],
+  ["slides", "🖥️ Taqdimotlar"],
   ["students", "👥 O'quvchilar"],
   ["trainer", "🎙 Trenajyor natijalari"],
   ["self-study", "🧩 Mustaqil ishlar"],
@@ -34,7 +37,7 @@ export async function render(el, tab = "", param) {
     content
   );
   mount(content, loading());
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   await view(content, param);
@@ -76,6 +79,152 @@ async function overview(el) {
 
 const stageName = (s) => ({ pre: "Diagnostik", post: "Yakuniy", any: "Umumiy" })[s] || s;
 const audienceName = (a) => ({ student: "O'quvchilar", teacher: "O'qituvchilar", all: "Barcha" })[a] || a;
+
+// ---------------- Taqdimotlar ----------------
+
+async function slidesManager(el) {
+  const { slides } = await api.get("slides");
+  const byTopic = Object.fromEntries(slides.map((x) => [x.topicId, x]));
+  const kindLabel = { pdf: "PDF", pptx: "PowerPoint", link: "Havola" };
+
+  const preview = (meta) => {
+    const v = slideViewer(meta);
+    const close = modal(meta.title, v, { wide: true });
+    const obs = new MutationObserver(() => {
+      if (!v.isConnected) {
+        v.destroy?.();
+        obs.disconnect();
+      }
+    });
+    obs.observe(document.body, { childList: true });
+    return close;
+  };
+
+  const row = (t) => {
+    const status = h("div", { class: "sm-status" });
+    const bar = h("div", { class: "sm-upload hidden" }, h("div", { class: "sm-upload-fill" }), h("span", {}, "0%"));
+    const fileInput = h("input", { type: "file", accept: ".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation", class: "hidden", onchange: () => fileInput.files[0] && upload(fileInput.files[0]) });
+
+    const drawStatus = () => {
+      const m = byTopic[t.id];
+      status.replaceChildren(
+        m
+          ? h("div", {}, h("span", { class: "badge badge-ok" }, kindLabel[m.kind]), " ", h("b", {}, m.title), h("div", { class: "muted small" }, [m.kind === "link" ? m.url : `${m.name} · ${fmtSize(m.size)}${m.pages ? ` · ${m.pages} slayd` : ""}`, ` · ${fmtDate(m.uploadedAt)}`]))
+          : h("span", { class: "muted small" }, "Taqdimot joylanmagan")
+      );
+      actions.querySelector(".sm-view").disabled = !m;
+      actions.querySelector(".sm-del").disabled = !m;
+    };
+
+    async function upload(file) {
+      if (!/\.(pdf|pptx)$/i.test(file.name)) return toast("Faqat .pdf yoki .pptx fayl yuklang", "error");
+      bar.classList.remove("hidden");
+      card.classList.add("uploading");
+      const setP = (f) => {
+        bar.firstChild.style.transform = `scaleX(${f})`;
+        bar.lastChild.textContent = `${Math.round(f * 100)}%`;
+      };
+      setP(0);
+      try {
+        byTopic[t.id] = await uploadSlides(t.id, file, { onProgress: setP });
+        toast(`${t.num}-mavzu: taqdimot joylandi`, "ok");
+        drawStatus();
+      } catch (err) {
+        toast(err.message, "error");
+      } finally {
+        card.classList.remove("uploading");
+        setTimeout(() => bar.classList.add("hidden"), 600);
+        fileInput.value = "";
+      }
+    }
+
+    const linkForm = () => {
+      const url = h("input", { type: "url", placeholder: "https://docs.google.com/presentation/d/...", required: true, value: byTopic[t.id]?.kind === "link" ? byTopic[t.id].url : "" });
+      const title = h("input", { placeholder: "Taqdimot nomi", value: byTopic[t.id]?.title || t.title });
+      const close = modal(
+        `${t.num}-mavzu: havola orqali joylash`,
+        h(
+          "form",
+          { onsubmit: async (e) => {
+            e.preventDefault();
+            try {
+              byTopic[t.id] = await api.put(`admin/slides/${t.id}/link`, { url: url.value.trim(), title: title.value.trim() });
+              toast("Taqdimot havolasi saqlandi", "ok");
+              drawStatus();
+              close();
+            } catch (err) {
+              toast(err.message, "error");
+            }
+          } },
+          h("p", { class: "muted small" }, "Google Slides (Fayl → Ulashish → Internetda e'lon qilish), Canva (Ulashish → Ko'rish havolasi), OneDrive / PowerPoint Online (Joylashtirish havolasi) havolalarini qo'yishingiz mumkin. Havola hamma uchun ochiq bo'lishi kerak."),
+          h("label", { class: "field" }, h("span", {}, "Havola"), url),
+          h("label", { class: "field" }, h("span", {}, "Nomi"), title),
+          h("div", { class: "row end" }, h("button", { class: "btn", type: "submit" }, "Saqlash"))
+        )
+      );
+    };
+
+    const actions = h(
+      "div",
+      { class: "row wrap sm-actions" },
+      h("button", { class: "btn small", onclick: () => fileInput.click() }, "📤 Fayl yuklash"),
+      h("button", { class: "btn small ghost", onclick: linkForm }, "🔗 Havola"),
+      h("button", { class: "btn small ghost sm-view", onclick: () => preview(byTopic[t.id]) }, "👁 Ko'rish"),
+      h("button", { class: "btn small ghost danger-text sm-del", onclick: async () => {
+        if (!(await confirmDialog(`${t.num}-mavzu taqdimotini o'chirasizmi?`))) return;
+        try {
+          await api.del(`admin/slides/${t.id}`);
+          delete byTopic[t.id];
+          drawStatus();
+          toast("Taqdimot o'chirildi", "ok");
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      } }, "🗑")
+    );
+
+    const card = h(
+      "div",
+      {
+        class: "card sm-row",
+        ondragover: (e) => {
+          e.preventDefault();
+          card.classList.add("drag");
+        },
+        ondragleave: () => card.classList.remove("drag"),
+        ondrop: (e) => {
+          e.preventDefault();
+          card.classList.remove("drag");
+          const f = e.dataTransfer.files[0];
+          if (f) upload(f);
+        },
+      },
+      h("div", { class: "sm-thumb" }, t.image ? h("img", { src: t.image, alt: "" }) : t.icon),
+      h("div", { class: "sm-main" }, h("div", { class: "eyebrow" }, `${t.num}-mavzu`), h("h3", {}, t.title), status, bar),
+      actions,
+      fileInput
+    );
+    drawStatus();
+    return card;
+  };
+
+  mount(
+    el,
+    h(
+      "div",
+      { class: "alert alert-info" },
+      h("b", {}, "Har bir mavzu uchun taqdimot joylang. "),
+      "O'quvchi mavzuni ochganda taqdimot darsning boshida o'rnatilgan slayd ko'ruvchida chiqadi (varaqlash, to'liq ekran, avtomatik ko'rsatish). ",
+      h("br"),
+      "Eng yaxshi natija uchun ",
+      h("b", {}, "PDF"),
+      " yuklang (PowerPoint'da: Fayl → Eksport → PDF), eng ko'pi 60 MB. ",
+      h("b", {}, ".pptx"),
+      " fayllar (20 MB gacha) PowerPoint Online orqali ko'rsatiladi. Faylni kartaga sudrab tashlash ham mumkin."
+    ),
+    h("div", { class: "stack sm-list" }, TOPICS.map(row))
+  );
+}
 
 // ---------------- Natijalar ----------------
 
@@ -689,7 +838,7 @@ async function students(el) {
             } catch (ex) {
               toast(ex.message, "error");
             }
-          } }, Object.entries(COHORTS).map(([k, v]) => h("option", { value: k, selected: (u.cohort || "unassigned") === k }, v))))
+          } }, Object.entries(COHORTS).map(([k, v]) => h("option", { value: k, selected: (u.cohort || "unassigned") === k }, v))), u.cohortSource === "self" && h("div", { class: "muted small" }, "o'quvchi o'zi tanlagan"))
         )
       )
     );
