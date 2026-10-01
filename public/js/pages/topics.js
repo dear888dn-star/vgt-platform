@@ -5,6 +5,7 @@ import { loadProgress, topicState, updateTopic, topicCompletion, setNote } from 
 import { renderMethod } from "../methods.js";
 import { TOPIC_MAP } from "../../data/standard.js";
 import { competencyChips } from "../competency.js";
+import { confetti, shake } from "../motion.js";
 
 export async function renderList(el) {
   await loadProgress();
@@ -18,13 +19,13 @@ export async function renderList(el) {
         const pct = topicCompletion(t);
         return h(
           "a",
-          { href: `#/topics/${t.id}`, class: "card topic-card" },
-          t.image ? h("img", { class: "topic-thumb", src: t.image, alt: "", loading: "lazy" }) : h("div", { class: "topic-thumb placeholder", "aria-hidden": "true" }, t.icon),
+          { href: `#/topics/${t.id}`, class: "card topic-card tilt" },
+          h("div", { class: "topic-thumb-wrap" }, t.image ? h("img", { class: "topic-thumb", src: t.image, alt: "", loading: "lazy" }) : h("div", { class: "topic-thumb placeholder", "aria-hidden": "true" }, t.icon), h("span", { class: "num-badge" }, `${t.num}-mavzu`)),
           h("div", { class: "topic-num" }, t.icon, h("span", {}, `${t.num}-mavzu`)),
           h("h3", {}, t.title),
           h("p", { class: "muted small clamp" }, t.goal),
           h("div", { class: "chips" }, [...new Set(t.methods.map((m) => m.type))].map((type) => h("span", { class: "chip chip-soft" }, METHOD_INFO[type].icon, " ", METHOD_INFO[type].name))),
-          h("div", { class: "row between small muted" }, h("span", {}, `${t.sections.length} bo'lim · ${t.quiz.length} test`), h("span", {}, pct ? `${pct}% bajarildi` : "Boshlanmagan")),
+          h("div", { class: "row between small muted" }, h("span", {}, `📖 ${t.sections.length} bo'lim · 🃏 ${t.glossary.length} · ❓ ${t.questions.length} · ✅ ${t.quiz.length} test`), h("span", {}, pct ? `${pct}% bajarildi` : "Boshlanmagan")),
           progressBar(pct)
         );
       })
@@ -43,6 +44,17 @@ export async function renderList(el) {
   );
 }
 
+const CHAPTERS = [
+  ["theory", "📖", "Nazariya"],
+  ["glossary", "🃏", "Tushunchalar"],
+  ["methods", "🧠", "Interaktiv metodlar"],
+  ["questions", "❓", "Nazorat savollari"],
+  ["quiz", "✅", "Test"],
+  ["self", "🧩", "Mustaqil ish"],
+];
+
+const stripTags = (html) => html.replace(/<[^>]+>/g, " ");
+
 export async function renderTopic(el, id) {
   await loadProgress();
   const idx = TOPICS.findIndex((t) => t.id === id);
@@ -50,54 +62,156 @@ export async function renderTopic(el, id) {
   if (!topic) throw new Error("Mavzu topilmadi");
   const prev = TOPICS[idx - 1];
   const next = TOPICS[idx + 1];
+  const words = topic.sections.reduce((n, s) => n + stripTags(s.html).split(/\s+/).filter(Boolean).length, 0);
+  const minutes = Math.max(1, Math.round(words / 160));
+  const counts = { theory: topic.sections.length, glossary: topic.glossary.length, methods: topic.methods.length, questions: topic.questions.length, quiz: topic.quiz.length, self: topic.selfStudy.length };
 
-  const tabs = [
-    ["theory", "📖 Nazariya", () => theoryTab(topic)],
-    ["glossary", "🃏 Tushunchalar", () => glossaryTab(topic)],
-    ["methods", `🧠 Interaktiv metodlar (${topic.methods.length})`, () => methodsTab(topic)],
-    ["questions", `❓ Nazorat savollari (${topic.questions.length})`, () => questionsTab(topic)],
-    ["quiz", `✅ Test (${topic.quiz.length})`, () => quizTab(topic)],
-    ["self", "🧩 Mustaqil ish", () => selfTab(topic)],
-  ];
-  const bar = h("div", { class: "progress-line" });
-  const drawBar = () => {
+  // Progress halqasi
+  const ring = h("div", { class: "hero-ring", style: { "--p": 0 } }, h("b", {}, "0%"), h("span", {}, "bajarildi"));
+  const drawRing = () => {
     const pct = topicCompletion(topic);
-    bar.replaceChildren(h("span", { class: "small muted" }, `Mavzu bo'yicha progress: ${pct}%`), progressBar(pct));
+    ring.style.setProperty("--p", pct);
+    ring.querySelector("b").textContent = `${pct}%`;
   };
-  drawBar();
-  window.addEventListener("vgt:progress", drawBar);
+  drawRing();
+  window.addEventListener("vgt:progress", drawRing);
 
-  const content = h("div", { class: "tab-content" });
-  const tabBar = h("div", { class: "tabs", role: "tablist" });
-  const select = (key) => {
-    tabBar.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.key === key));
-    const tab = tabs.find((t) => t[0] === key);
-    content.replaceChildren(tab[2]());
-    history.replaceState(null, "", `#/topics/${topic.id}?tab=${key}`);
-  };
-  tabs.forEach(([key, label]) => tabBar.append(h("button", { role: "tab", "data-key": key, onclick: () => select(key) }, label)));
-  const initial = new URLSearchParams(location.hash.split("?")[1] || "").get("tab") || "theory";
+  const body = h(
+    "div",
+    { class: "lesson-body" },
+    chapter("theory", "📖", "Nazariya", `${topic.sections.length} bo'lim · ~${minutes} daqiqa o'qish`, theoryBlock(topic)),
+    chapter("glossary", "🃏", "Tayanch tushunchalar", `${topic.glossary.length} ta tushuncha — kartani bosing`, glossaryTab(topic)),
+    chapter("methods", "🧠", "Interaktiv metodlar", `${topic.methods.length} ta topshiriq`, methodsTab(topic)),
+    chapter("questions", "❓", "Nazorat savollari", `${topic.questions.length} ta savol (o'quv qo'llanmadan)`, questionsTab(topic)),
+    chapter("quiz", "✅", "O'zingizni sinang", `${topic.quiz.length} ta test (o'quv qo'llanmadan)`, quizTab(topic)),
+    chapter("self", "🧩", "Mustaqil ish", `${topic.selfStudy.length} ta topshiriq`, selfTab(topic))
+  );
+
+  const rail = h(
+    "nav",
+    { class: "lesson-rail", "aria-label": "Dars bo'limlari" },
+    h("div", { class: "rail-title" }, `${topic.num}-mavzu`),
+    CHAPTERS.map(([key, icon, label]) => [
+      h("a", { href: `#learn-${key}`, "data-key": key, onclick: (e) => { e.preventDefault(); document.getElementById(`learn-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); } }, h("span", { class: "rail-icon" }, icon), h("span", { class: "rail-label" }, label), h("span", { class: "rail-count" }, counts[key])),
+      key === "theory" && h("div", { class: "rail-sub" }, topic.sections.filter((x) => x.title).map((x, i) => h("a", { href: `#sec-${i}`, "data-sec": i, onclick: (e) => { e.preventDefault(); document.getElementById(`sec-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); } }, x.title.replace(/^\d+\.\d+\.\s*/, "")))),
+    ])
+  );
+
+  const notesBtn = notesDrawer(topic);
 
   mount(
     el,
+    h("div", { class: "reading-progress", "aria-hidden": "true" }, h("div", { class: "reading-progress-fill" })),
     h("nav", { class: "crumbs" }, h("a", { href: "#/topics" }, "Mavzular"), " / ", `${topic.num}-mavzu`),
     h(
       "header",
-      { class: "topic-hero" },
-      topic.image ? h("img", { class: "topic-hero-img", src: topic.image, alt: topic.title }) : h("div", { class: "topic-hero-icon" }, topic.icon),
-      h("div", {}, h("div", { class: "eyebrow" }, `${topic.num}-mavzu`), h("h1", {}, topic.title), h("p", { class: "lead" }, h("b", {}, "Maqsad: "), topic.goal), TOPIC_MAP[topic.id] && h("div", { class: "row wrap small" }, h("span", { class: "muted" }, "Kasb standarti kompetensiyalari:"), competencyChips(TOPIC_MAP[topic.id])), bar)
+      { class: `lesson-hero ${topic.image ? "" : "no-image"}` },
+      topic.image && h("img", { class: "lesson-hero-img", src: topic.image, alt: "" }),
+      h("div", { class: "lesson-hero-overlay" }),
+      h(
+        "div",
+        { class: "lesson-hero-content" },
+        h("div", { class: "lesson-hero-badge" }, h("span", { class: "hero-emoji" }, topic.icon), `${topic.num}-mavzu`),
+        h("h1", { class: "lesson-title" }, topic.title),
+        h("p", { class: "lesson-goal" }, topic.goal),
+        h("div", { class: "lesson-stats" },
+          [["📖", `${topic.sections.length} bo'lim`], ["⏱", `~${minutes} daq`], ["🃏", `${topic.glossary.length} tushuncha`], ["❓", `${topic.questions.length} savol`], ["✅", `${topic.quiz.length} test`]].map(([i, t]) => h("span", { class: "stat-pill" }, i, " ", t))),
+        TOPIC_MAP[topic.id] && h("div", { class: "lesson-comps" }, competencyChips(TOPIC_MAP[topic.id]))
+      ),
+      ring
     ),
-    tabBar,
-    content,
+    h("div", { class: "lesson-layout" }, rail, body),
     h(
       "div",
-      { class: "row between pager" },
-      prev ? h("a", { href: `#/topics/${prev.id}`, class: "btn ghost" }, "← ", prev.title.slice(0, 40), "…") : h("span"),
-      next ? h("a", { href: `#/topics/${next.id}`, class: "btn ghost" }, next.title.slice(0, 40), "… →") : h("span")
-    )
+      { class: "lesson-pager" },
+      prev ? h("a", { href: `#/topics/${prev.id}`, class: "pager-card" }, h("small", {}, "← Oldingi mavzu"), h("b", {}, `${prev.num}. ${prev.title}`)) : h("span"),
+      next ? h("a", { href: `#/topics/${next.id}`, class: "pager-card next" }, h("small", {}, "Keyingi mavzu →"), h("b", {}, `${next.num}. ${next.title}`)) : h("span")
+    ),
+    notesBtn
   );
-  select(tabs.some((t) => t[0] === initial) ? initial : "theory");
-  return () => window.removeEventListener("vgt:progress", drawBar);
+
+  // Eski ?tab= havolalari: tegishli bo'limga o'tish
+  const initial = new URLSearchParams(location.hash.split("?")[1] || "").get("tab");
+  if (initial && initial !== "theory") setTimeout(() => document.getElementById(`learn-${initial}`)?.scrollIntoView({ block: "start" }), 120);
+
+  // Scrollspy va o'qish progressi
+  const fill = el.querySelector(".reading-progress-fill");
+  const onScroll = () => {
+    const rect = body.getBoundingClientRect();
+    const total = rect.height - window.innerHeight * 0.6;
+    const pct = Math.min(1, Math.max(0, -rect.top / Math.max(total, 1)));
+    fill.style.transform = `scaleX(${pct})`;
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+  const spy = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const key = e.target.dataset.chapter;
+        const sec = e.target.dataset.sec;
+        if (key) rail.querySelectorAll("a[data-key]").forEach((a) => a.classList.toggle("active", a.dataset.key === key));
+        if (sec !== undefined) rail.querySelectorAll("a[data-sec]").forEach((a) => a.classList.toggle("active", a.dataset.sec === sec));
+      }
+    },
+    { rootMargin: "-35% 0px -60% 0px" }
+  );
+  el.querySelectorAll("[data-chapter], .book-section[data-sec]").forEach((n) => spy.observe(n));
+
+  return () => {
+    window.removeEventListener("vgt:progress", drawRing);
+    window.removeEventListener("scroll", onScroll);
+    spy.disconnect();
+    notesBtn.remove();
+  };
+}
+
+function chapter(key, icon, title, sub, content) {
+  return h(
+    "section",
+    { class: "chapter", id: `learn-${key}`, "data-chapter": key },
+    h("div", { class: "chapter-head reveal" }, h("span", { class: "chapter-icon" }, icon), h("div", {}, h("h2", {}, title), h("p", { class: "muted small" }, sub))),
+    content
+  );
+}
+
+function notesDrawer(topic) {
+  const ta = h("textarea", { rows: 12, placeholder: "Mavzu bo'yicha qisqacha konspekt, savollaringiz..." });
+  loadProgress().then((p) => (ta.value = p.notes[topic.id] || ""));
+  ta.addEventListener("input", () => setNote(topic.id, ta.value));
+  const panel = h(
+    "aside",
+    { class: "notes-drawer", "aria-label": "Konspekt" },
+    h("div", { class: "row between" }, h("h3", {}, "📝 Konspekt"), h("button", { class: "icon-btn", "aria-label": "Yopish", onclick: () => wrap.classList.remove("open") }, "✕")),
+    h("p", { class: "muted small" }, `${topic.num}-mavzu. Avtomatik saqlanadi.`),
+    ta,
+    topic.resources.length > 0 && h("div", {}, h("h4", {}, "🔗 Foydali resurslar"), h("ul", { class: "links" }, topic.resources.map((r) => h("li", {}, h("a", { href: r.url, target: "_blank", rel: "noopener" }, r.title))))),
+    topic.trainer.length > 0 && h("div", {}, h("h4", {}, "🎙 Trenajyorda mashq qiling"), h("div", { class: "stack" }, topic.trainer.map((tid) => h("a", { href: `#/trainer/${tid}`, class: "btn small ghost" }, TRAINER_NAMES[tid] || tid))))
+  );
+  const wrap = h("div", { class: "notes-wrap" }, h("button", { class: "notes-fab", "aria-label": "Konspekt va resurslar", onclick: () => wrap.classList.toggle("open") }, "📝"), panel);
+  return wrap;
+}
+
+function theoryBlock(topic) {
+  const st = topicState(topic.id);
+  const readBtn = h("button", { class: `btn lg ${st.read ? "ghost" : ""}`, onclick: () => {
+    updateTopic(topic.id, (s) => (s.read = true));
+    readBtn.textContent = "✓ O'qib chiqildi";
+    readBtn.className = "btn lg ghost";
+    changed();
+    toast("Nazariy qism o'qildi deb belgilandi", "ok");
+  } }, st.read ? "✓ O'qib chiqildi" : "O'qib chiqdim deb belgilash");
+  let secIdx = -1;
+  return h(
+    "div",
+    { class: "stack" },
+    h("div", { class: "card plan-card reveal" }, h("h3", {}, "🗒 Dars rejasi"), h("ol", { class: "plan-steps" }, topic.plan.map((p) => h("li", {}, p.replace(/^\d+\.\d+\.\s*/, ""))))),
+    topic.sections.map((s) => {
+      if (s.title) secIdx++;
+      return h("article", { class: "card book-section reveal", ...(s.title ? { id: `sec-${secIdx}`, "data-sec": String(secIdx) } : {}) }, s.title && h("h3", { class: "section-heading" }, s.title), h("div", { class: "book-text prose", html: s.html }));
+    }),
+    h("div", { class: "row between wrap reveal" }, h("p", { class: "muted small" }, "Manba: ", COURSE.source), readBtn)
+  );
 }
 
 const TRAINER_NAMES = {
@@ -110,42 +224,6 @@ const TRAINER_NAMES = {
 };
 
 const changed = () => window.dispatchEvent(new Event("vgt:progress"));
-
-function theoryTab(topic) {
-  const st = topicState(topic.id);
-  const readBtn = h("button", { class: `btn ${st.read ? "ghost" : ""}`, onclick: () => {
-    updateTopic(topic.id, (s) => (s.read = true));
-    readBtn.textContent = "✓ O'qib chiqildi";
-    readBtn.className = "btn ghost";
-    changed();
-    toast("Nazariy qism o'qildi deb belgilandi", "ok");
-  } }, st.read ? "✓ O'qib chiqildi" : "O'qib chiqdim deb belgilash");
-  const notes = h("textarea", { rows: 6, placeholder: "Mavzu bo'yicha qisqacha konspekt, savollaringiz..." });
-  loadProgress().then((p) => (notes.value = p.notes[topic.id] || ""));
-  notes.addEventListener("input", () => setNote(topic.id, notes.value));
-
-  return h(
-    "div",
-    { class: "grid cols-3-1" },
-    h(
-      "article",
-      { class: "card prose" },
-      topic.sections.map((s) => h("section", {}, s.title && h("h2", {}, s.title), h("div", { class: "book-text", html: s.html }))),
-      h("p", { class: "muted small" }, "Manba: ", COURSE.source),
-      h("div", { class: "row end" }, readBtn)
-    ),
-    h(
-      "aside",
-      { class: "stack" },
-      h("div", { class: "card" }, h("h3", {}, "🗒 Reja"), h("ol", { class: "plan-mini" }, topic.plan.map((p) => h("li", {}, p.replace(/^\d+\.\d+\.\s*/, ""))))),
-      h("div", { class: "card" }, h("h3", {}, "📝 Konspekt"), notes, h("p", { class: "muted small" }, "Avtomatik saqlanadi.")),
-      topic.trainer.length > 0 &&
-        h("div", { class: "card accent" }, h("h3", {}, "🎙 Trenajyorda mashq qiling"), h("p", { class: "small" }, "Mavzu bo'yicha bilimlarni real kasbiy vaziyatda sinab ko'ring:"), h("div", { class: "stack" }, topic.trainer.map((id) => h("a", { href: `#/trainer/${id}`, class: "btn small ghost" }, TRAINER_NAMES[id] || id)))),
-      topic.resources.length > 0 &&
-        h("div", { class: "card" }, h("h3", {}, "🔗 Foydali resurslar"), h("ul", { class: "links" }, topic.resources.map((r) => h("li", {}, h("a", { href: r.url, target: "_blank", rel: "noopener" }, r.title)))))
-    )
-  );
-}
 
 function glossaryTab(topic) {
   const st = topicState(topic.id);
@@ -228,6 +306,7 @@ function quizTab(topic) {
       const ok = answers[i] === q.correct;
       if (ok) correct++;
       qs[i].classList.add(ok ? "ok" : "bad");
+      if (!ok) setTimeout(() => shake(qs[i]), i * 60);
       const ex = qs[i].querySelector(".quiz-explain");
       ex.classList.remove("hidden");
       ex.textContent = ok ? "✓ To'g'ri." : `✗ To'g'ri javob: ${q.options[q.correct]}`;
@@ -240,14 +319,24 @@ function quizTab(topic) {
     });
     changed();
     submit.disabled = true;
+    const cls = score >= 80 ? "score-high" : score >= 60 ? "score-mid" : "score-low";
     result.replaceChildren(
-      h("div", { class: `alert ${score >= 60 ? "alert-ok" : "alert-warn"}` }, h("b", {}, `Natija: ${correct}/${topic.quiz.length} (${score}%). `), score >= 80 ? "A'lo natija!" : score >= 60 ? "Yaxshi, mavzu o'zlashtirildi." : "Nazariy qismni qayta o'qib, testni qayta topshiring."),
-      h("button", { class: "btn ghost", onclick: () => wrap.replaceWith(quizTab(topic)) }, "Qayta topshirish")
+      h(
+        "div",
+        { class: "card quiz-result" },
+        h("div", { class: `score-ring ${cls}`, style: { "--pct": score } }, h("b", {}, `${score}%`), h("span", {}, `${correct}/${topic.quiz.length}`)),
+        h("div", {}, h("h3", {}, score >= 80 ? "A'lo natija! 🏆" : score >= 60 ? "Yaxshi, mavzu o'zlashtirildi 👍" : "Yana bir urinib ko'ring 💪"), h("p", { class: "muted" }, score >= 60 ? "Natijangiz saqlandi. Keyingi bo'limga o'tishingiz mumkin." : "Nazariy qismni qayta o'qib, testni qayta topshiring. O'tish balli — 60%."), h("button", { class: "btn ghost", onclick: () => wrap.replaceWith(quizTab(topic)) }, "🔁 Qayta topshirish"))
+      )
     );
+    result.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (score >= 80) {
+      const r = result.getBoundingClientRect();
+      setTimeout(() => confetti(r.left + r.width / 2, r.top + 60), 350);
+    }
   } }, "Javoblarni tekshirish");
   wrap.append(
     ...[
-      st.quiz !== null && h("div", { class: "alert alert-info" }, `Eng yaxshi natijangiz: ${st.quiz}% (urinishlar: ${st.quizAttempts || 1}). O'tish balli — 60%.`),
+      st.quiz != null && h("div", { class: "alert alert-info" }, `Eng yaxshi natijangiz: ${st.quiz}% (urinishlar: ${st.quizAttempts || 1}). O'tish balli — 60%.`),
       h("p", { class: "muted small" }, "Test savollari o'quv qo'llanmadan olingan. Variantlar tartibi har safar aralashtiriladi."),
       ...qs,
       submit,

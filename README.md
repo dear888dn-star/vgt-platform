@@ -41,6 +41,13 @@
 4. **Deploy** tugmasini bosing. Har bir `git push` dan keyin sayt avtomatik yangilanadi.
 5. Saytda **Ro'yxatdan o'tish → O'qituvchi** ni tanlab, `TEACHER_CODE` bilan o'qituvchi profilini yarating.
 
+### Xatoliklarni tekshirish
+
+Ro'yxatdan o'tish yoki kirishda xatolik chiqsa, brauzerda `https://<sayt-nomi>.netlify.app/api/health` ni oching. U ma'lumotlar ombori (Netlify Blobs), `JWT_SECRET`, `TEACHER_CODE` va AI holatini ko'rsatadi.
+
+- `blobs` qatorida "XATO" chiqsa — saytni Netlify'da qayta deploy qiling (**Deploys → Trigger deploy → Clear cache and deploy site**). Bu yordam bermasa, `NETLIFY_SITE_ID` (Site configuration → General → Site ID) va `NETLIFY_BLOBS_TOKEN` (User settings → Applications → Personal access token) o'zgaruvchilarini qo'shing.
+- `JWT_SECRET` o'rnatilmagan bo'lsa, server avtomatik maxfiy kalit yaratib, omborda saqlaydi; baribir uni o'zingiz o'rnatish tavsiya etiladi.
+
 > Eslatma: AI baholash 10–20 soniya davom etishi mumkin. Agar Netlify funksiya vaqt chegarasi xatosini bersa, `ANTHROPIC_MODEL=claude-sonnet-5-5` ni o'rnating.
 
 ## Lokal ishga tushirish

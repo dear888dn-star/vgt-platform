@@ -5,71 +5,86 @@ import { loadProgress, topicCompletion } from "../progress.js";
 
 export async function render(el) {
   const user = session.user;
-  const progress = await loadProgress();
+  await loadProgress();
   const done = TOPICS.filter((t) => topicCompletion(t) === 100).length;
-  const started = TOPICS.filter((t) => progress.topics[t.id]).length;
+  const tests = TOPICS.reduce((s, t) => s + t.quiz.length, 0);
+  const questions = TOPICS.reduce((s, t) => s + t.questions.length, 0);
 
   const features = [
-    ["📚", "Interaktiv mavzular", `${TOPICS.length} ta mavzu: nazariya, tayanch tushunchalar, flesh-kartalar, testlar va 9 xil interaktiv metod.`, "#/topics"],
-    ["🧩", "Mustaqil ta'lim", "Shaxsiy o'quv rejasi, mustaqil ish topshiriqlari, o'qituvchi bahosi va refleksiv kundalik.", "#/self-study"],
+    ["📚", "Interaktiv mavzular", `${TOPICS.length} ta mavzu: o'quv qo'llanma matni, rasmlar, tushunchalar, nazorat savollari, testlar va 9 xil interaktiv metod.`, "#/topics"],
     ["🎙️", "Virtual gidlik trenajyori", "Sun'iy intellekt turist rolini o'ynaydi va sizni real vaqt rejimida kasbiy vaziyatlarga soladi.", "#/trainer"],
-    ["🗺️", "Marshrut laboratoriyasi", "Turistik marshrutni raqamli xaritada modellashtirish: obyektlar bazasi, masofa va vaqt hisobi, variantlarni taqqoslash, marshrut pasporti.", "#/route-lab"],
-    ["📝", "Kompleks diagnostika", "T0–T2 bosqichlarida anketa, test, amaliy topshiriqlar va refleksiya: natijalar o'qituvchi paneliga avtomatik yig'iladi.", "#/diagnostics"],
+    ["🗺️", "Marshrut laboratoriyasi", "Turistik marshrutni raqamli xaritada modellashtirish: obyektlar bazasi, masofa va vaqt, marshrut pasporti.", "#/route-lab"],
+    ["🧩", "Mustaqil ta'lim", "Shaxsiy o'quv rejasi, mustaqil ish topshiriqlari, o'qituvchi bahosi va refleksiv kundalik.", "#/self-study"],
+    ["📝", "Kompleks diagnostika", "T0–T2 bosqichlarida anketa, test, amaliy topshiriqlar va refleksiya — natijalar avtomatik hisoblanadi.", "#/diagnostics"],
+    ["🎯", "Kasb standarti", "Gid tarjimon kasb standarti: mehnat funksiyalari, kompetensiyalar va shaxsiy kompetensiya xaritangiz.", "#/standard"],
   ];
+
+  const orbit = (cls, icons) =>
+    h("div", { class: `orbit ${cls}` }, icons.map((ic, i) => {
+      const a = (i / icons.length) * Math.PI * 2;
+      return h("span", { class: "orbit-item", style: { left: `${50 + Math.cos(a) * 50}%`, top: `${50 + Math.sin(a) * 50}%` } }, ic);
+    }));
 
   mount(
     el,
     h(
       "section",
-      { class: "hero" },
+      { class: "hero-xl" },
       h(
         "div",
-        { class: "hero-text" },
-        h("div", { class: "eyebrow" }, COURSE.audience),
-        h("h1", {}, COURSE.title),
+        {},
+        h("span", { class: "hero-chip" }, h("span", { class: "dot" }), COURSE.audience),
+        h("h1", {}, h("span", { class: "gradient-text" }, "Turizmda raqamli"), h("br"), "texnologiyalar"),
         h("p", { class: "lead" }, COURSE.description),
         h(
           "div",
           { class: "row wrap" },
-          h("a", { href: "#/trainer", class: "btn lg" }, "🎙️ Trenajyorni boshlash"),
-          h("a", { href: "#/topics", class: "btn ghost lg" }, "Mavzularni o'rganish")
+          h("a", { href: "#/topics", class: "btn lg" }, "📚 O'qishni boshlash"),
+          h("a", { href: "#/trainer", class: "btn ghost lg" }, "🎙️ Trenajyorni sinash")
+        ),
+        h(
+          "div",
+          { class: "counter-row" },
+          [[TOPICS.length, "mavzu"], [tests, "test savoli"], [questions, "nazorat savoli"], [10, "trenajyor ssenariysi"]].map(([n, l]) => h("div", { class: "counter" }, h("b", { "data-count": n }, "0"), h("span", {}, l)))
         )
       ),
       h(
         "div",
-        { class: "hero-card card" },
-        user
-          ? [
-              h("div", { class: "eyebrow" }, "Shaxsiy kabinet"),
-              h("h3", {}, `Xush kelibsiz, ${user.name.split(" ")[0]}!`),
-              h("div", { class: "stat-row" },
-                h("div", { class: "stat" }, h("b", {}, `${done}/${TOPICS.length}`), h("span", {}, "mavzu tugallandi")),
-                h("div", { class: "stat" }, h("b", {}, started), h("span", {}, "mavzu boshlangan"))),
-              h("a", { href: user.role === "teacher" ? "#/teacher" : "#/self-study", class: "btn block" }, user.role === "teacher" ? "O'qituvchi paneli" : "O'quv rejamga o'tish"),
-            ]
-          : [
-              h("div", { class: "eyebrow" }, "Boshlash"),
-              h("h3", {}, "Profilingizni yarating"),
-              h("p", { class: "muted" }, "Email va parol orqali ro'yxatdan o'ting: progressingiz saqlanadi, trenajyor va so'rovnomalar ochiladi."),
-              h("a", { href: "#/register", class: "btn block" }, "Ro'yxatdan o'tish"),
-              h("a", { href: "#/login", class: "btn ghost block" }, "Kirish"),
-            ]
+        { class: "hero-visual", "aria-hidden": "true" },
+        orbit("o1", ["🕌", "✈️", "🗺️", "🏨", "📱", "🎧"]),
+        orbit("o2", ["🤖", "☁️", "🔐", "📊"]),
+        orbit("o3", ["🧭", "🎯", "📸"]),
+        h("div", { class: "hero-core" }, "🧭")
       )
     ),
-    h("section", { class: "grid cols-3" }, features.map(([icon, title, text, href]) => h("a", { href, class: "card feature" }, h("div", { class: "feature-icon" }, icon), h("h3", {}, title), h("p", { class: "muted" }, text)))),
+    user &&
+      h(
+        "div",
+        { class: "card hero-card accent" },
+        h("div", { class: "row between wrap" },
+          h("div", {}, h("div", { class: "eyebrow" }, "Shaxsiy kabinet"), h("h3", {}, `Xush kelibsiz, ${user.name.split(" ")[0]}!`), h("p", { class: "muted small" }, `${done} / ${TOPICS.length} mavzu to'liq o'zlashtirildi`)),
+          h("div", { class: "row wrap" },
+            h("a", { href: user.role === "teacher" ? "#/teacher" : "#/self-study", class: "btn" }, user.role === "teacher" ? "O'qituvchi paneli" : "O'quv rejam"),
+            user.role === "student" && h("a", { href: "#/standard", class: "btn ghost" }, "🎯 Kompetensiya xaritam")))
+      ),
+    !user &&
+      h("div", { class: "card hero-card accent" }, h("div", { class: "row between wrap" }, h("div", {}, h("h3", {}, "Profilingizni yarating"), h("p", { class: "muted small" }, "Email va parol orqali ro'yxatdan o'ting: progressingiz saqlanadi, trenajyor, diagnostika va marshrut laboratoriyasi ochiladi.")), h("div", { class: "row" }, h("a", { href: "#/register", class: "btn" }, "Ro'yxatdan o'tish"), h("a", { href: "#/login", class: "btn ghost" }, "Kirish")))),
+    h("h2", { class: "section-title" }, "Platforma imkoniyatlari"),
+    h("section", { class: "grid cols-3" }, features.map(([icon, title, text, href]) => h("a", { href, class: "card feature tilt" }, h("div", { class: "feature-icon" }, icon), h("h3", {}, title), h("p", { class: "muted small" }, text)))),
     h(
       "section",
       { class: "card how" },
       h("h2", {}, "Platformada qanday o'qiladi?"),
       h(
         "ol",
-        { class: "steps" },
-        h("li", {}, h("b", {}, "Diagnostika. "), "Diagnostika bo'limida aniqlovchi bosqich (T0): anketa, test, amaliy topshiriqlar va refleksiya."),
-        h("li", {}, h("b", {}, "Nazariya va metodlar. "), "Har bir mavzuni o'qing, interaktiv metodlarni bajaring, flesh-kartalar va test bilan mustahkamlang."),
-        h("li", {}, h("b", {}, "Marshrut laboratoriyasi. "), "Turistik marshrutni raqamli xaritada modellashtirib, loyihani o'qituvchiga topshiring."),
-        h("li", {}, h("b", {}, "Mustaqil ta'lim. "), "O'quv rejangizni tuzing, mustaqil ishlarni topshiring va o'qituvchi fikrini oling."),
-        h("li", {}, h("b", {}, "Trenajyor. "), "Virtual gidlik trenajyorida real vaziyatlarni mashq qiling, AI bahosi asosida o'sing."),
-        h("li", {}, h("b", {}, "Yakuniy baholash. "), "Yakunlovchi diagnostika (T2) va marshrut loyihasini himoya qilish — natijalaringiz o'sishini ko'ring.")
+        { class: "timeline" },
+        [
+          ["Diagnostika", "Aniqlovchi bosqich (T0): anketa, test, amaliy topshiriqlar va refleksiya."],
+          ["Nazariya va metodlar", "Har bir mavzuni o'qing, interaktiv metodlarni bajaring, tushunchalar, nazorat savollari va test bilan mustahkamlang."],
+          ["Marshrut laboratoriyasi", "Turistik marshrutni raqamli xaritada modellashtirib, loyihani o'qituvchiga topshiring."],
+          ["Trenajyor", "Virtual gidlik trenajyorida real vaziyatlarni mashq qiling, AI bahosi asosida o'sing."],
+          ["Yakuniy baholash", "Yakunlovchi diagnostika (T2) — o'sishingizni va kompetensiya xaritangizni ko'ring."],
+        ].map(([t, d], i) => h("li", { class: "reveal" }, h("span", { class: "t-num" }, i + 1), h("b", {}, t), h("p", { class: "muted small" }, d)))
       )
     )
   );

@@ -1,6 +1,7 @@
 // Platformaning yagona API funksiyasi: /api/* so'rovlarini marshrutlaydi.
 import { db, getMany } from "../lib/store.mjs";
-import { hashPassword, verifyPassword, createToken, readToken, newId } from "../lib/auth.mjs";
+import { hashPassword, verifyPassword, createToken, readToken, newId, setGeneratedSecret } from "../lib/auth.mjs";
+import crypto from "node:crypto";
 import { SEED_SURVEYS, SEED_VERSION } from "../lib/seed-surveys.mjs";
 import {
   SCENARIOS,
@@ -896,6 +897,41 @@ async function allEvidence(req) {
   return json(items);
 }
 
+// ---------- Sozlamalar va diagnostika ----------
+
+let secretReady = false;
+async function ensureSecret() {
+  if (secretReady || process.env.JWT_SECRET || process.env.VGT_LOCAL_DATA) return;
+  const store = db();
+  let meta = await store.get("meta/secret");
+  if (!meta?.value) {
+    meta = { value: crypto.randomBytes(48).toString("base64url"), createdAt: new Date().toISOString() };
+    await store.set("meta/secret", meta);
+  }
+  setGeneratedSecret(meta.value);
+  secretReady = true;
+}
+
+function describeError(err) {
+  const name = err?.name || "";
+  const msg = String(err?.message || err);
+  if (name === "MissingBlobsEnvironmentError" || /Netlify Blobs/i.test(msg)) return "Ma'lumotlar ombori (Netlify Blobs) ulanmagan. /api/health sahifasini tekshiring.";
+  if (/JWT_SECRET/.test(msg)) return "JWT_SECRET sozlanmagan.";
+  return `Serverda kutilmagan xatolik yuz berdi (${name || "Error"}: ${msg.slice(0, 160)})`;
+}
+
+async function health() {
+  const checks = { blobs: "tekshirilmoqda", jwtSecret: process.env.JWT_SECRET ? "o'rnatilgan" : "avtomatik (omborda)", teacherCode: process.env.TEACHER_CODE ? "o'rnatilgan" : "o'rnatilmagan", ai: provider() ? `${provider()} (${modelName()})` : "demo-rejim", node: process.version };
+  try {
+    await db().set("meta/health", { at: new Date().toISOString() });
+    await db().get("meta/health");
+    checks.blobs = "ishlayapti";
+  } catch (err) {
+    checks.blobs = `XATO: ${err?.name || ""} ${String(err?.message || err).slice(0, 200)}`;
+  }
+  return json(checks, checks.blobs === "ishlayapti" ? 200 : 500);
+}
+
 // ---------- Router ----------
 
 const routes = [
@@ -903,6 +939,7 @@ const routes = [
   ["POST", /^auth\/login$/, login],
   ["GET", /^me$/, async (req) => json(publicUser(await requireUser(req)))],
   ["PUT", /^me$/, updateMe],
+  ["GET", /^health$/, health],
   ["GET", /^config$/, async () => json({ aiEnabled: aiEnabled(), teacherSignup: Boolean(process.env.TEACHER_CODE) })],
 
   ["GET", /^surveys$/, listSurveys],
@@ -954,6 +991,7 @@ const routes = [
 export default async function handler(req) {
   const path = new URL(req.url).pathname.replace(/^\/(\.netlify\/functions\/api|api)\/?/, "").replace(/\/$/, "");
   try {
+    if (path !== "health") await ensureSecret();
     for (const [method, pattern, fn] of routes) {
       const m = path.match(pattern);
       if (m && req.method === method) return await fn(req, ...m.slice(1).map(decodeURIComponent));
@@ -962,7 +1000,7 @@ export default async function handler(req) {
   } catch (err) {
     if (err instanceof HttpError) return json({ error: err.message }, err.status);
     console.error(err);
-    return json({ error: "Serverda kutilmagan xatolik yuz berdi" }, 500);
+    return json({ error: describeError(err) }, 500);
   }
 }
 

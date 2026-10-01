@@ -39,7 +39,10 @@ function fileStore(dir) {
 }
 
 function blobStore() {
-  const store = getStore({ name: STORE_NAME, consistency: "strong" });
+  // Netlify Functions muhitida ombor avtomatik ulanadi. Avtomatik ulanmasa, NETLIFY_SITE_ID va
+  // NETLIFY_BLOBS_TOKEN (shaxsiy kirish tokeni) orqali qo'lda ulanadi.
+  const manual = process.env.NETLIFY_SITE_ID && process.env.NETLIFY_BLOBS_TOKEN ? { siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN } : {};
+  const store = getStore({ name: STORE_NAME, consistency: "strong", ...manual });
   return {
     get: (key) => store.get(key, { type: "json" }),
     set: (key, value) => store.setJSON(key, value),

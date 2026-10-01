@@ -1,6 +1,7 @@
 // Ilova marshrutizatori va navigatsiya.
 import { h, mount, errorBox } from "./ui.js";
 import { session } from "./api.js";
+import { watch, transition, initTopbar } from "./motion.js";
 import * as home from "./pages/home.js";
 import * as auth from "./pages/auth.js";
 import * as topics from "./pages/topics.js";
@@ -83,8 +84,10 @@ async function route() {
       mount(main, errorBox(new Error("Bu bo'lim faqat o'qituvchilar uchun.")));
       return;
     }
-    main.replaceChildren();
-    window.scrollTo(0, 0);
+    await transition(() => {
+      main.replaceChildren();
+      window.scrollTo(0, 0);
+    });
     try {
       cleanup = (await fn(main, ...m.slice(1))) || null;
     } catch (e) {
@@ -105,4 +108,6 @@ window.addEventListener("hashchange", route);
 window.addEventListener("vgt:auth", renderNav);
 document.getElementById("year").textContent = new Date().getFullYear();
 main.setAttribute("tabindex", "-1");
+initTopbar();
+watch(main);
 route();

@@ -5,8 +5,15 @@ import { promisify } from "node:util";
 const scrypt = promisify(crypto.scrypt);
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 kun
 
+let generatedSecret = null;
+
+/** JWT_SECRET o'rnatilmagan bo'lsa, omborda saqlangan avtomatik kalit ishlatiladi (api.mjs: ensureSecret). */
+export function setGeneratedSecret(s) {
+  generatedSecret = s;
+}
+
 function secret() {
-  const s = process.env.JWT_SECRET;
+  const s = process.env.JWT_SECRET || generatedSecret;
   if (s) return s;
   if (process.env.VGT_LOCAL_DATA) return "local-dev-secret";
   throw new Error("JWT_SECRET muhit o'zgaruvchisi o'rnatilmagan");

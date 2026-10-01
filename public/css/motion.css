@@ -1,0 +1,246 @@
+/* Raqamli Gid Akademiyasi — vizual qatlam: aurora fon, shisha kartalar, gradientlar,
+   scroll-reveal, sahifa o'tishlari va dars (mavzu) sahifasi animatsiyalari. */
+
+:root {
+  --grad-primary: linear-gradient(135deg, #0e7c86 0%, #12a4a8 45%, #3fc1c9 100%);
+  --grad-gold: linear-gradient(135deg, #c8912a, #f0c46a);
+  --grad-hero: linear-gradient(120deg, #0b5f69 0%, #0e7c86 35%, #1aa3a8 65%, #c8912a 120%);
+  --glass: color-mix(in srgb, var(--surface) 78%, transparent);
+  --glass-border: color-mix(in srgb, var(--primary) 14%, var(--border));
+  --glow: 0 10px 40px -12px color-mix(in srgb, var(--primary) 45%, transparent);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --font-display: "Unbounded", "Inter", system-ui, sans-serif;
+}
+
+/* ---------- Aurora fon ---------- */
+body { background: var(--bg); position: relative; overflow-x: hidden; }
+body::before, body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.55;
+}
+body::before {
+  width: 60vmax; height: 60vmax;
+  top: -25vmax; left: -15vmax;
+  background: radial-gradient(circle at 30% 30%, color-mix(in srgb, #3fc1c9 55%, transparent), transparent 60%),
+              radial-gradient(circle at 70% 60%, color-mix(in srgb, #7b4fa0 30%, transparent), transparent 60%);
+  animation: aurora-a 26s ease-in-out infinite alternate;
+}
+body::after {
+  width: 55vmax; height: 55vmax;
+  bottom: -25vmax; right: -15vmax;
+  background: radial-gradient(circle at 40% 40%, color-mix(in srgb, #f0c46a 45%, transparent), transparent 60%),
+              radial-gradient(circle at 60% 70%, color-mix(in srgb, #0e7c86 40%, transparent), transparent 60%);
+  animation: aurora-b 32s ease-in-out infinite alternate;
+}
+@keyframes aurora-a { to { transform: translate(18vmax, 10vmax) rotate(40deg) scale(1.15); } }
+@keyframes aurora-b { to { transform: translate(-16vmax, -12vmax) rotate(-30deg) scale(1.1); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body::before, :root:not([data-theme="light"]) body::after { opacity: 0.32; } }
+
+/* ---------- Tipografiya ---------- */
+h1, .lesson-title, .hero h1 { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; }
+.gradient-text {
+  background: var(--grad-hero);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradient-move 8s ease-in-out infinite alternate;
+}
+@keyframes gradient-move { to { background-position: 100% 50%; } }
+
+/* ---------- Topbar (shisha) ---------- */
+.topbar { background: color-mix(in srgb, var(--surface) 70%, transparent); backdrop-filter: saturate(160%) blur(14px); transition: box-shadow 0.3s, background 0.3s; }
+.topbar.scrolled { box-shadow: 0 6px 30px -12px rgba(8, 40, 46, 0.25); background: color-mix(in srgb, var(--surface) 88%, transparent); }
+.brand-mark { display: inline-block; animation: compass 6s ease-in-out infinite; }
+@keyframes compass { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(18deg); } }
+.nav a { position: relative; transition: color 0.2s, background 0.2s; }
+.nav a::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 4px; height: 2px; border-radius: 2px; background: var(--grad-primary); transform: scaleX(0); transition: transform 0.3s var(--ease-out); }
+.nav a:hover::after, .nav a.active::after { transform: scaleX(1); }
+.nav a.btn::after { display: none; }
+
+/* ---------- Kartalar ---------- */
+.card { background: var(--glass); backdrop-filter: blur(10px); border-color: var(--glass-border); transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out), border-color 0.3s; }
+a.card:hover, .card.hoverable:hover { transform: translateY(-4px); box-shadow: var(--glow); border-color: color-mix(in srgb, var(--primary) 40%, transparent); }
+.tilt { transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transform-style: preserve-3d; position: relative; overflow: hidden; }
+.tilt::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, 0.22), transparent 45%); opacity: 0; transition: opacity 0.3s; }
+.tilt:hover::after { opacity: 1; }
+
+/* ---------- Tugmalar ---------- */
+.btn:not(.ghost):not(.danger) { background: var(--grad-primary); border-color: transparent; position: relative; overflow: hidden; box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--primary) 70%, transparent); }
+.btn:not(.ghost):not(.danger)::before { content: ""; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent); transform: skewX(-20deg); transition: left 0.6s var(--ease-out); }
+.btn:not(.ghost):not(.danger):hover::before { left: 120%; }
+.btn { transition: transform 0.2s var(--ease-out), box-shadow 0.2s, filter 0.2s; }
+.btn:active { transform: scale(0.97); }
+.btn.ghost { backdrop-filter: blur(6px); }
+
+/* ---------- Scroll-reveal ---------- */
+.reveal { opacity: 0; transform: translateY(22px) scale(0.985); transition: opacity 0.7s var(--ease-out) var(--stagger, 0ms), transform 0.7s var(--ease-out) var(--stagger, 0ms); }
+.reveal.in { opacity: 1; transform: none; }
+a.card.reveal.in:hover { transform: translateY(-4px); }
+.tilt.reveal.in { transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); }
+
+/* ---------- Sahifa o'tishi ---------- */
+main > * { animation: page-in 0.5s var(--ease-out) both; }
+@keyframes page-in { from { opacity: 0; transform: translateY(10px); } }
+::view-transition-old(root) { animation: vt-out 0.22s ease both; }
+::view-transition-new(root) { animation: vt-in 0.38s var(--ease-out) both; }
+@keyframes vt-out { to { opacity: 0; transform: translateY(-6px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(10px); } }
+
+/* ---------- Bosh sahifa ---------- */
+.hero-xl { position: relative; padding: 48px 0 24px; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 32px; align-items: center; }
+.hero-xl h1 { font-size: clamp(2.2rem, 5vw, 3.6rem); line-height: 1.08; margin-bottom: 18px; }
+.hero-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-border); font-size: 0.85rem; font-weight: 600; color: var(--primary); backdrop-filter: blur(8px); }
+.hero-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.6); animation: ping 1.8s infinite; }
+@keyframes ping { to { box-shadow: 0 0 0 10px rgba(46, 204, 113, 0); } }
+.hero-visual { position: relative; aspect-ratio: 1 / 1; max-width: 460px; justify-self: center; width: 100%; }
+.orbit { position: absolute; inset: 0; border-radius: 50%; border: 1px dashed color-mix(in srgb, var(--primary) 35%, transparent); animation: spin 40s linear infinite; }
+.orbit.o2 { inset: 14%; animation-duration: 28s; animation-direction: reverse; }
+.orbit.o3 { inset: 30%; animation-duration: 20s; }
+.orbit-item { position: absolute; width: 56px; height: 56px; margin: -28px; border-radius: 16px; display: grid; place-items: center; font-size: 1.6rem; background: var(--glass); border: 1px solid var(--glass-border); box-shadow: var(--shadow); backdrop-filter: blur(8px); animation: spin 40s linear infinite reverse; }
+.orbit.o2 .orbit-item { animation-duration: 28s; animation-direction: normal; }
+.orbit.o3 .orbit-item { animation-duration: 20s; }
+.hero-core { position: absolute; inset: 38%; border-radius: 50%; background: var(--grad-hero); background-size: 200% 200%; animation: gradient-move 6s ease-in-out infinite alternate, breathe 4s ease-in-out infinite; display: grid; place-items: center; font-size: 2.6rem; box-shadow: 0 20px 60px -10px color-mix(in srgb, var(--primary) 60%, transparent); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes breathe { 50% { transform: scale(1.06); } }
+.counter-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 18px 0 8px; }
+.counter { padding: 18px; border-radius: var(--radius); background: var(--glass); border: 1px solid var(--glass-border); backdrop-filter: blur(10px); }
+.counter b { display: block; font-family: var(--font-display); font-size: 2rem; background: var(--grad-primary); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.counter span { color: var(--muted); font-size: 0.85rem; }
+.feature-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 16px; background: color-mix(in srgb, var(--primary) 12%, transparent); font-size: 1.7rem; margin-bottom: 12px; transition: transform 0.4s var(--ease-out); }
+a.feature:hover .feature-icon { transform: rotate(-8deg) scale(1.12); }
+.timeline { list-style: none; padding: 0; margin: 0; position: relative; }
+.timeline::before { content: ""; position: absolute; left: 19px; top: 6px; bottom: 6px; width: 2px; background: var(--grad-primary); transform-origin: top; animation: draw-line 1.6s var(--ease-out) both; }
+@keyframes draw-line { from { transform: scaleY(0); } }
+.timeline li { position: relative; padding: 0 0 18px 56px; }
+.timeline li .t-num { position: absolute; left: 0; top: -4px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); border: 2px solid var(--primary); font-weight: 800; color: var(--primary); }
+
+/* ---------- Mavzular ro'yxati ---------- */
+.topic-card { position: relative; overflow: hidden; }
+.topic-card .topic-thumb { height: 180px; transition: transform 0.8s var(--ease-out), filter 0.4s; }
+.topic-card:hover .topic-thumb { transform: scale(1.06); filter: saturate(1.15); }
+.topic-thumb-wrap { overflow: hidden; border-radius: 12px; margin-bottom: 12px; position: relative; }
+.topic-thumb-wrap .topic-thumb { margin: 0; display: block; }
+.topic-thumb-wrap .topic-thumb.placeholder { display: grid; place-items: center; font-size: 4.5rem; background: var(--grad-hero, linear-gradient(135deg, var(--primary-soft), var(--accent-soft))); }
+.topic-thumb-wrap .topic-thumb.placeholder { background-size: 200% 200%; animation: floaty 5s ease-in-out infinite alternate; }
+@keyframes floaty { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+.topic-thumb-wrap .num-badge { position: absolute; left: 12px; top: 12px; padding: 4px 12px; border-radius: 999px; background: rgba(5, 25, 30, 0.6); color: #fff; font-weight: 700; font-size: 0.8rem; backdrop-filter: blur(6px); }
+
+/* ---------- Dars sahifasi ---------- */
+.reading-progress { position: fixed; top: 0; left: 0; right: 0; height: 4px; z-index: 60; pointer-events: none; }
+.reading-progress-fill { height: 100%; background: var(--grad-gold); transform-origin: left; transform: scaleX(0); box-shadow: 0 0 12px color-mix(in srgb, #f0c46a 70%, transparent); }
+.lesson-hero { position: relative; min-height: 380px; border-radius: 24px; overflow: hidden; display: flex; align-items: flex-end; margin-bottom: 26px; background: var(--grad-hero); box-shadow: 0 30px 80px -30px rgba(8, 50, 56, 0.55); }
+.lesson-hero-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: kenburns 24s ease-in-out infinite alternate; }
+@keyframes kenburns { from { transform: scale(1.05) translate(0, 0); } to { transform: scale(1.18) translate(-2%, -3%); } }
+.lesson-hero-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(4, 30, 36, 0.05) 0%, rgba(4, 30, 36, 0.55) 45%, rgba(4, 30, 36, 0.92) 100%); }
+.lesson-hero.no-image .lesson-hero-overlay { background: radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.18), transparent 50%), linear-gradient(180deg, transparent, rgba(4, 30, 36, 0.5)); }
+.lesson-hero-content { position: relative; padding: 32px 36px; color: #fff; max-width: 860px; animation: hero-rise 0.9s var(--ease-out) both; }
+@keyframes hero-rise { from { opacity: 0; transform: translateY(24px); } }
+.lesson-hero-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.25); backdrop-filter: blur(8px); font-weight: 700; font-size: 0.85rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.hero-emoji { font-size: 1.2rem; }
+.lesson-title { font-size: clamp(1.6rem, 3.4vw, 2.6rem); margin: 14px 0 10px; color: #fff; text-shadow: 0 2px 20px rgba(0, 0, 0, 0.35); }
+.lesson-goal { color: rgba(255, 255, 255, 0.88); max-width: 760px; }
+.lesson-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.stat-pill { padding: 6px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.22); font-size: 0.85rem; font-weight: 600; backdrop-filter: blur(6px); }
+.lesson-comps .chip { background: rgba(255, 255, 255, 0.9); }
+.hero-ring { --p: 0; position: absolute; right: 28px; top: 28px; width: 104px; height: 104px; border-radius: 50%; display: grid; place-items: center; align-content: center; color: #fff;
+  background: radial-gradient(closest-side, rgba(4, 30, 36, 0.75) 78%, transparent 80% 100%), conic-gradient(#f0c46a calc(var(--p) * 1%), rgba(255, 255, 255, 0.18) 0);
+  transition: --p 1s; backdrop-filter: blur(6px); }
+.hero-ring b { font-size: 1.4rem; line-height: 1; }
+.hero-ring span { font-size: 0.7rem; opacity: 0.8; }
+@property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
+
+.lesson-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; align-items: start; }
+.lesson-rail { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 18px; background: var(--glass); border: 1px solid var(--glass-border); backdrop-filter: blur(12px); max-height: calc(100vh - 110px); overflow-y: auto; }
+.rail-title { font-family: var(--font-display); font-size: 0.8rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 8px 10px; }
+.lesson-rail a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: 0.92rem; transition: background 0.25s, color 0.25s, transform 0.25s var(--ease-out); }
+.lesson-rail a:hover { background: var(--surface-2); color: var(--text); transform: translateX(3px); }
+.lesson-rail a.active { background: var(--primary-soft); color: var(--primary); }
+.rail-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--surface-2); flex-shrink: 0; transition: transform 0.3s var(--ease-out); }
+.lesson-rail a.active .rail-icon { background: var(--grad-primary); transform: scale(1.08); }
+.rail-label { flex: 1; }
+.rail-count { font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); }
+.rail-sub { margin: 4px 0 0 18px; padding-left: 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; }
+.rail-sub a { font-weight: 500; font-size: 0.8rem; padding: 5px 8px; border-radius: 8px; line-height: 1.3; }
+.rail-sub a.active { color: var(--primary); background: transparent; box-shadow: inset 2px 0 0 var(--primary); transform: none; }
+
+.lesson-body { display: flex; flex-direction: column; gap: 46px; min-width: 0; }
+.chapter { scroll-margin-top: 90px; }
+.chapter-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.chapter-head h2 { margin: 0; font-family: var(--font-display); font-size: 1.35rem; }
+.chapter-head p { margin: 2px 0 0; }
+.chapter-icon { width: 52px; height: 52px; display: grid; place-items: center; font-size: 1.6rem; border-radius: 16px; background: var(--grad-primary); box-shadow: var(--glow); flex-shrink: 0; }
+.book-section { scroll-margin-top: 90px; padding: 26px 30px; }
+.section-heading { font-family: var(--font-display); font-size: 1.12rem; color: var(--primary); margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid transparent; border-image: var(--grad-primary) 1; }
+.book-text { font-size: 1.02rem; line-height: 1.75; }
+.book-text p { margin-bottom: 0.9em; }
+.book-text ul li::marker { color: var(--primary); }
+.book-text b { color: var(--text); background: linear-gradient(transparent 62%, color-mix(in srgb, #f0c46a 40%, transparent) 62%); }
+.book-table tbody tr { transition: background 0.2s; }
+.book-table tbody tr:hover { background: var(--primary-soft); }
+.plan-steps { counter-reset: step; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.plan-steps li { counter-increment: step; display: flex; gap: 12px; align-items: flex-start; }
+.plan-steps li::before { content: counter(step); flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 0.85rem; color: #fff; background: var(--grad-primary); }
+
+.lesson-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 40px; }
+.pager-card { display: flex; flex-direction: column; gap: 4px; padding: 18px 20px; border-radius: 16px; text-decoration: none; color: var(--text); background: var(--glass); border: 1px solid var(--glass-border); transition: transform 0.3s var(--ease-out), box-shadow 0.3s; }
+.pager-card.next { text-align: right; }
+.pager-card:hover { transform: translateY(-3px); box-shadow: var(--glow); }
+.pager-card small { color: var(--primary); font-weight: 700; }
+
+.notes-wrap { position: fixed; right: 22px; bottom: 22px; z-index: 70; }
+.notes-fab { width: 58px; height: 58px; border-radius: 50%; border: none; cursor: pointer; font-size: 1.5rem; background: var(--grad-gold); box-shadow: 0 12px 30px -8px rgba(200, 145, 42, 0.7); transition: transform 0.3s var(--ease-out); animation: fab-in 0.6s var(--ease-out) 0.6s both; }
+.notes-fab:hover { transform: scale(1.08) rotate(-6deg); }
+@keyframes fab-in { from { opacity: 0; transform: scale(0.4); } }
+.notes-drawer { position: fixed; right: 22px; bottom: 92px; width: min(380px, calc(100vw - 44px)); max-height: 70vh; overflow-y: auto; padding: 18px; border-radius: 20px; background: var(--surface); border: 1px solid var(--glass-border); box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.35); transform-origin: bottom right; transform: scale(0.85) translateY(20px); opacity: 0; pointer-events: none; transition: transform 0.35s var(--ease-out), opacity 0.25s; }
+.notes-wrap.open .notes-drawer { transform: none; opacity: 1; pointer-events: auto; }
+
+/* Test animatsiyalari */
+.quiz-q.ok { animation: pop 0.45s var(--ease-out); }
+@keyframes pop { 40% { transform: scale(1.015); } }
+.shake { animation: shake 0.45s; }
+@keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.option { transition: background 0.2s, border-color 0.2s, transform 0.2s var(--ease-out); }
+.option:hover { transform: translateX(3px); }
+.confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 300; }
+.confetti-layer i { position: absolute; width: 9px; height: 14px; border-radius: 2px; animation: confetti 1.5s var(--ease-out) forwards; }
+@keyframes confetti { to { transform: translate(var(--dx), calc(var(--dy) + 260px)) rotate(var(--rot)); opacity: 0; } }
+.flashcard { transition: transform 0.3s var(--ease-out); }
+.flashcard:hover { transform: translateY(-4px); }
+.flash-inner { transition: transform 0.7s var(--ease-out); }
+
+/* Mobil */
+@media (max-width: 960px) {
+  .lesson-layout { grid-template-columns: 1fr; }
+  .lesson-rail { position: sticky; top: 64px; z-index: 15; flex-direction: row; overflow-x: auto; max-height: none; padding: 8px; border-radius: 14px; }
+  .rail-title, .rail-sub, .rail-count { display: none; }
+  .lesson-rail a { flex-shrink: 0; padding: 7px 10px; }
+  .hero-xl { grid-template-columns: 1fr; }
+  .hero-visual { max-width: 320px; }
+  .counter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .lesson-hero { min-height: 420px; border-radius: 18px; }
+  .lesson-hero-content { padding: 22px 18px; }
+  .hero-ring { width: 78px; height: 78px; right: 14px; top: 14px; }
+  .hero-ring b { font-size: 1.1rem; }
+  .book-section { padding: 18px; }
+  .rail-label { font-size: 0.82rem; }
+  .lesson-pager { grid-template-columns: 1fr; }
+}
+
+/* Harakatni kamaytirish sozlamasi */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .reveal { opacity: 1; transform: none; }
+}
+@media print {
+  body::before, body::after, .reading-progress, .notes-wrap, .lesson-rail { display: none !important; }
+}
+.quiz-result { display: flex; gap: 22px; align-items: center; animation: pop 0.5s var(--ease-out); }
+@media (max-width: 600px) { .quiz-result { flex-direction: column; text-align: center; } }
