@@ -6,7 +6,7 @@
 
 | Bo'lim | Tavsif |
 |---|---|
-| 📚 **Mavzular** | 11 ta mavzu: maqsad, reja, nazariy qism, tayanch tushunchalar (flesh-kartalar), konspekt, test va 9 xil interaktiv metod (aqliy hujum, klaster, Venn diagrammasi, keys-stadi, FSMU, INSERT, moslashtirish, T-jadval, ketma-ketlik). |
+| 📚 **Mavzular** | “Turizmda raqamli texnologiyalar” o'quv qo'llanmasining (Jizzax, 2025) 15 ta mavzusi: to'liq nazariy matn, jadvallar, muqovalar, nazorat savollari (yozma javob bilan), qo'llanma testlari (variantlar aralashtiriladi), glossariy (flesh-kartalar), konspekt va 9 xil interaktiv metod (aqliy hujum, klaster, Venn diagrammasi, keys-stadi, FSMU, INSERT, moslashtirish, T-jadval, ketma-ketlik). |
 | 🧩 **Mustaqil ta'lim** | Shaxsiy o'quv rejasi (muddatlar bilan), mustaqil ish topshiriqlari (matn + havola), o'qituvchi bahosi va izohi, refleksiv kundalik, shaxsiy tavsiyalar. |
 | 🎙️ **Virtual gidlik trenajyori** | 10 ta kasbiy ssenariy. AI turist/mijoz rolini o'ynaydi, javoblar real vaqtda oqim bilan chiqadi, mashg'ulot davomida kutilmagan hodisalar kiritiladi, marshrut bekatlari, "Ustoz maslahati", taymer. Yakunda 5 mezon × 20 ball = 100 ballik AI baholash va tavsiyalar. |
 | 📝 **So'rovnomalar** | Diagnostik va yakuniy bosqich so'rovnomalari, bilim testlari, SUS metodikasi asosidagi trenajyor bahosi, ekspert so'rovnomasi. O'quvchi email va parol bilan kiradi va topshiradi. |
@@ -59,7 +59,13 @@ Lokal rejimda ma'lumotlar `.data/` papkasida saqlanadi, o'qituvchi kodi — `ust
 
 ## Kontentni yangilash
 
-- **Mavzular**: `public/data/topics.js` — har bir mavzu uchun nazariya, tushunchalar, metodlar, test va mustaqil ishlar.
+- **O'quv qo'llanma matni** (nazariya, reja, nazorat savollari, testlar, glossariy, rasmlar): qo'llanmaning yangi .docx versiyasidan avtomatik import qilinadi:
+  ```bash
+  python3 scripts/import-docx.py "Turizmda_raqamli_texnologiyalar.docx"
+  ```
+  Natija: `public/data/book.js` va `public/img/topics/`. Rasmlarni siqish uchun ImageMagick (`convert`) kerak.
+- **Test kalitlari**: `public/data/answer-key.js` — qo'llanmada javoblar kaliti yo'qligi sababli mazmun asosida tuzilgan, o'qituvchi tekshirib chiqishi tavsiya etiladi.
+- **Pedagogik qatlam** (mavzu maqsadi, interaktiv metodlar, mustaqil ishlar, resurslar, trenajyor bilan bog'lanish): `public/data/topics.js`.
 - **Boshlang'ich so'rovnomalar**: `netlify/lib/seed-surveys.mjs` (birinchi ishga tushirishda bazaga yoziladi; keyin o'qituvchi panelidagi konstruktor orqali tahrirlanadi).
 - **Trenajyor ssenariylari**: `netlify/lib/scenarios.mjs` — vaziyat, personaj, kutilmagan hodisalar, marshrut.
 

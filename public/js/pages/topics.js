@@ -1,12 +1,11 @@
 import { h, mount, toast, progressBar } from "../ui.js";
 import { session } from "../api.js";
-import { TOPICS, METHOD_INFO } from "../../data/topics.js";
+import { TOPICS, METHOD_INFO, COURSE, BOOK_INTRO, LITERATURE } from "../../data/topics.js";
 import { loadProgress, topicState, updateTopic, topicCompletion, setNote } from "../progress.js";
 import { renderMethod } from "../methods.js";
 
 export async function renderList(el) {
   await loadProgress();
-  const totalHours = TOPICS.reduce((s, t) => s + t.hours, 0);
   const search = h("input", { type: "search", placeholder: "Mavzu yoki tushuncha bo'yicha qidirish...", class: "search" });
   const grid = h("div", { class: "grid cols-2" });
   const draw = () => {
@@ -18,11 +17,12 @@ export async function renderList(el) {
         return h(
           "a",
           { href: `#/topics/${t.id}`, class: "card topic-card" },
+          t.image ? h("img", { class: "topic-thumb", src: t.image, alt: "", loading: "lazy" }) : h("div", { class: "topic-thumb placeholder", "aria-hidden": "true" }, t.icon),
           h("div", { class: "topic-num" }, t.icon, h("span", {}, `${t.num}-mavzu`)),
           h("h3", {}, t.title),
           h("p", { class: "muted small clamp" }, t.goal),
           h("div", { class: "chips" }, [...new Set(t.methods.map((m) => m.type))].map((type) => h("span", { class: "chip chip-soft" }, METHOD_INFO[type].icon, " ", METHOD_INFO[type].name))),
-          h("div", { class: "row between small muted" }, h("span", {}, `${t.hours} soat`), h("span", {}, pct ? `${pct}% bajarildi` : "Boshlanmagan")),
+          h("div", { class: "row between small muted" }, h("span", {}, `${t.sections.length} bo'lim · ${t.quiz.length} test`), h("span", {}, pct ? `${pct}% bajarildi` : "Boshlanmagan")),
           progressBar(pct)
         );
       })
@@ -33,9 +33,11 @@ export async function renderList(el) {
   draw();
   mount(
     el,
-    h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Fan mavzulari"), h("p", { class: "muted" }, `${TOPICS.length} ta mavzu · ${totalHours} akademik soat`)), search),
+    h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Fan mavzulari"), h("p", { class: "muted" }, `${TOPICS.length} ta mavzu · manba: ${COURSE.source}`)), search),
+    BOOK_INTRO && h("details", { class: "card" }, h("summary", {}, h("b", {}, "📘 O'quv qo'llanma haqida (Kirish)")), h("div", { class: "prose", html: BOOK_INTRO })),
     !session.user && h("div", { class: "alert alert-info" }, "Siz mehmon sifatida o'qiyapsiz — progress faqat shu brauzerda saqlanadi. ", h("a", { href: "#/register" }, "Ro'yxatdan o'ting"), " va natijalaringiz profilingizda saqlansin."),
-    grid
+    grid,
+    LITERATURE.length > 0 && h("details", { class: "card" }, h("summary", {}, h("b", {}, `📚 Foydalanilgan adabiyotlar (${LITERATURE.length})`)), h("ol", { class: "literature" }, LITERATURE.map((l) => h("li", {}, l.replace(/^\d+\.\s*/, "")))))
   );
 }
 
@@ -51,7 +53,8 @@ export async function renderTopic(el, id) {
     ["theory", "📖 Nazariya", () => theoryTab(topic)],
     ["glossary", "🃏 Tushunchalar", () => glossaryTab(topic)],
     ["methods", `🧠 Interaktiv metodlar (${topic.methods.length})`, () => methodsTab(topic)],
-    ["quiz", "✅ Test", () => quizTab(topic)],
+    ["questions", `❓ Nazorat savollari (${topic.questions.length})`, () => questionsTab(topic)],
+    ["quiz", `✅ Test (${topic.quiz.length})`, () => quizTab(topic)],
     ["self", "🧩 Mustaqil ish", () => selfTab(topic)],
   ];
   const bar = h("div", { class: "progress-line" });
@@ -79,8 +82,8 @@ export async function renderTopic(el, id) {
     h(
       "header",
       { class: "topic-hero" },
-      h("div", { class: "topic-hero-icon" }, topic.icon),
-      h("div", {}, h("div", { class: "eyebrow" }, `${topic.num}-mavzu · ${topic.hours} soat`), h("h1", {}, topic.title), h("p", { class: "lead" }, h("b", {}, "Maqsad: "), topic.goal), bar)
+      topic.image ? h("img", { class: "topic-hero-img", src: topic.image, alt: topic.title }) : h("div", { class: "topic-hero-icon" }, topic.icon),
+      h("div", {}, h("div", { class: "eyebrow" }, `${topic.num}-mavzu`), h("h1", {}, topic.title), h("p", { class: "lead" }, h("b", {}, "Maqsad: "), topic.goal), bar)
     ),
     tabBar,
     content,
@@ -94,6 +97,15 @@ export async function renderTopic(el, id) {
   select(tabs.some((t) => t[0] === initial) ? initial : "theory");
   return () => window.removeEventListener("vgt:progress", drawBar);
 }
+
+const TRAINER_NAMES = {
+  "khiva-virtual": "🏰 Ichan qal'a: onlayn virtual ekskursiya",
+  "registon-tour": "🕌 Registon ansambli bo'ylab ekskursiya",
+  "foreign-arrival": "✈️ Xorijiy turistni kutib olish",
+  overbooking: "🏨 Mehmonxonada overbooking",
+  "double-payment": "💳 Onlayn to'lovda ikki marta pul yechilishi",
+  "negative-review": "⭐ Salbiy onlayn sharhga javob",
+};
 
 const changed = () => window.dispatchEvent(new Event("vgt:progress"));
 
@@ -116,15 +128,17 @@ function theoryTab(topic) {
     h(
       "article",
       { class: "card prose" },
-      h("h2", {}, "Reja"),
-      h("ol", {}, topic.plan.map((p) => h("li", {}, p))),
-      topic.sections.map((s) => h("section", {}, h("h2", {}, s.title), h("div", { html: s.html }))),
+      topic.sections.map((s) => h("section", {}, s.title && h("h2", {}, s.title), h("div", { class: "book-text", html: s.html }))),
+      h("p", { class: "muted small" }, "Manba: ", COURSE.source),
       h("div", { class: "row end" }, readBtn)
     ),
     h(
       "aside",
       { class: "stack" },
+      h("div", { class: "card" }, h("h3", {}, "🗒 Reja"), h("ol", { class: "plan-mini" }, topic.plan.map((p) => h("li", {}, p.replace(/^\d+\.\d+\.\s*/, ""))))),
       h("div", { class: "card" }, h("h3", {}, "📝 Konspekt"), notes, h("p", { class: "muted small" }, "Avtomatik saqlanadi.")),
+      topic.trainer.length > 0 &&
+        h("div", { class: "card accent" }, h("h3", {}, "🎙 Trenajyorda mashq qiling"), h("p", { class: "small" }, "Mavzu bo'yicha bilimlarni real kasbiy vaziyatda sinab ko'ring:"), h("div", { class: "stack" }, topic.trainer.map((id) => h("a", { href: `#/trainer/${id}`, class: "btn small ghost" }, TRAINER_NAMES[id] || id)))),
       topic.resources.length > 0 &&
         h("div", { class: "card" }, h("h3", {}, "🔗 Foydali resurslar"), h("ul", { class: "links" }, topic.resources.map((r) => h("li", {}, h("a", { href: r.url, target: "_blank", rel: "noopener" }, r.title)))))
     )
@@ -180,16 +194,28 @@ function methodsTab(topic) {
   );
 }
 
+function shuffled(n) {
+  const a = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function quizTab(topic) {
   const st = topicState(topic.id);
   const answers = {};
   const result = h("div");
+  const wrap = h("div", { class: "stack" });
+  // Variantlar har safar aralashtiriladi: o'quvchi javob joylashuvini emas, mazmunini eslab qolsin.
+  const orders = topic.quiz.map((q) => shuffled(q.options.length));
   const qs = topic.quiz.map((q, i) =>
     h(
       "fieldset",
       { class: "quiz-q card" },
       h("legend", {}, `${i + 1}. ${q.q}`),
-      q.options.map((o, j) => h("label", { class: "option" }, h("input", { type: "radio", name: `q${i}`, onchange: () => (answers[i] = j) }), h("span", {}, o))),
+      orders[i].map((j, pos) => h("label", { class: "option" }, h("input", { type: "radio", name: `q${i}`, onchange: () => (answers[i] = j) }), h("span", {}, `${"ABCDEF"[pos]}) ${q.options[j]}`))),
       h("div", { class: "quiz-explain hidden" })
     )
   );
@@ -202,7 +228,7 @@ function quizTab(topic) {
       qs[i].classList.add(ok ? "ok" : "bad");
       const ex = qs[i].querySelector(".quiz-explain");
       ex.classList.remove("hidden");
-      ex.textContent = ok ? `✓ To'g'ri. ${q.explain || ""}` : `✗ To'g'ri javob: ${q.options[q.correct]}. ${q.explain || ""}`;
+      ex.textContent = ok ? "✓ To'g'ri." : `✗ To'g'ri javob: ${q.options[q.correct]}`;
       qs[i].querySelectorAll("input").forEach((inp) => (inp.disabled = true));
     });
     const score = Math.round((correct / topic.quiz.length) * 100);
@@ -214,16 +240,38 @@ function quizTab(topic) {
     submit.disabled = true;
     result.replaceChildren(
       h("div", { class: `alert ${score >= 60 ? "alert-ok" : "alert-warn"}` }, h("b", {}, `Natija: ${correct}/${topic.quiz.length} (${score}%). `), score >= 80 ? "A'lo natija!" : score >= 60 ? "Yaxshi, mavzu o'zlashtirildi." : "Nazariy qismni qayta o'qib, testni qayta topshiring."),
-      h("button", { class: "btn ghost", onclick: () => location.reload() }, "Qayta topshirish")
+      h("button", { class: "btn ghost", onclick: () => wrap.replaceWith(quizTab(topic)) }, "Qayta topshirish")
     );
   } }, "Javoblarni tekshirish");
+  wrap.append(
+    ...[
+      st.quiz !== null && h("div", { class: "alert alert-info" }, `Eng yaxshi natijangiz: ${st.quiz}% (urinishlar: ${st.quizAttempts || 1}). O'tish balli — 60%.`),
+      h("p", { class: "muted small" }, "Test savollari o'quv qo'llanmadan olingan. Variantlar tartibi har safar aralashtiriladi."),
+      ...qs,
+      submit,
+      result,
+    ].filter(Boolean)
+  );
+  return wrap;
+}
+
+function questionsTab(topic) {
+  const answers = h("div", { class: "stack" });
+  loadProgress().then((p) => {
+    answers.replaceChildren(
+      ...topic.questions.map((q, i) => {
+        const key = `${topic.id}:q${i}`;
+        const ta = h("textarea", { rows: 3, placeholder: "Javobingizni qisqacha yozing (ixtiyoriy, faqat sizga ko'rinadi)..." }, p.notes[key] || "");
+        ta.addEventListener("input", () => setNote(key, ta.value));
+        return h("div", { class: "card question" }, h("div", { class: "row" }, h("span", { class: "q-num" }, i + 1), h("b", {}, q)), ta);
+      })
+    );
+  });
   return h(
     "div",
     { class: "stack" },
-    st.quiz !== null && h("div", { class: "alert alert-info" }, `Eng yaxshi natijangiz: ${st.quiz}% (urinishlar: ${st.quizAttempts || 1}). O'tish balli — 60%.`),
-    qs,
-    submit,
-    result
+    h("div", { class: "alert alert-info" }, "Nazorat savollari o'quv qo'llanmadan olingan. Ularga yozma javob tayyorlab, seminar mashg'ulotiga tayyorlaning. Javoblaringiz avtomatik saqlanadi."),
+    answers
   );
 }
 

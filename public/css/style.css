@@ -507,3 +507,25 @@ details[open] > summary { margin-bottom: 12px; }
 @media (max-width: 600px) {
   .composer { flex-direction: column; align-items: stretch; }
 }
+
+/* O'quv qo'llanma matni */
+.topic-thumb { width: 100%; height: 150px; object-fit: cover; border-radius: 10px; margin-bottom: 10px; background: var(--surface-2); }
+.topic-hero-img { width: 140px; height: 140px; object-fit: cover; border-radius: 18px; flex-shrink: 0; box-shadow: var(--shadow); }
+.book-text p { text-align: justify; hyphens: auto; }
+.book-text h4 { margin: 1.2em 0 0.4em; color: var(--primary); }
+.book-text .caption { font-weight: 600; font-size: 0.9rem; color: var(--muted); margin: 1em 0 0.4em; text-align: right; }
+.table-scroll { overflow-x: auto; margin: 0 0 1em; border: 1px solid var(--border); border-radius: 10px; }
+.book-table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 560px; }
+.book-table th { background: var(--primary-soft); color: var(--primary); text-align: left; }
+.book-table th, .book-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.book-table tr:last-child td { border-bottom: none; }
+.plan-mini { padding-left: 18px; margin: 0; font-size: 0.9rem; }
+.plan-mini li { margin-bottom: 4px; }
+.literature { font-size: 0.88rem; padding-left: 22px; }
+.literature li { margin-bottom: 4px; }
+.question textarea { margin-top: 10px; }
+@media (max-width: 600px) {
+  .topic-hero-img { width: 100%; height: 180px; }
+  .book-text p { text-align: left; }
+}
+.topic-thumb.placeholder { display: grid; place-items: center; font-size: 4rem; background: linear-gradient(135deg, var(--primary-soft), var(--accent-soft)); }
