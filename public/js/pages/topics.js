@@ -3,6 +3,8 @@ import { session } from "../api.js";
 import { TOPICS, METHOD_INFO, COURSE, BOOK_INTRO, LITERATURE } from "../../data/topics.js";
 import { loadProgress, topicState, updateTopic, topicCompletion, setNote } from "../progress.js";
 import { renderMethod } from "../methods.js";
+import { TOPIC_MAP } from "../../data/standard.js";
+import { competencyChips } from "../competency.js";
 
 export async function renderList(el) {
   await loadProgress();
@@ -83,7 +85,7 @@ export async function renderTopic(el, id) {
       "header",
       { class: "topic-hero" },
       topic.image ? h("img", { class: "topic-hero-img", src: topic.image, alt: topic.title }) : h("div", { class: "topic-hero-icon" }, topic.icon),
-      h("div", {}, h("div", { class: "eyebrow" }, `${topic.num}-mavzu`), h("h1", {}, topic.title), h("p", { class: "lead" }, h("b", {}, "Maqsad: "), topic.goal), bar)
+      h("div", {}, h("div", { class: "eyebrow" }, `${topic.num}-mavzu`), h("h1", {}, topic.title), h("p", { class: "lead" }, h("b", {}, "Maqsad: "), topic.goal), TOPIC_MAP[topic.id] && h("div", { class: "row wrap small" }, h("span", { class: "muted" }, "Kasb standarti kompetensiyalari:"), competencyChips(TOPIC_MAP[topic.id])), bar)
     ),
     tabBar,
     content,

@@ -865,6 +865,35 @@ async function gradeRoute(req, userId, id) {
   return json(p);
 }
 
+// ---------- Kompetensiya dalillari (kasb standarti xaritasi uchun) ----------
+
+async function evidenceFor(uid) {
+  const [progress, selfStudy, trainer, routesList] = await Promise.all([
+    db().get(`progress/${uid}`),
+    getMany(`selfstudy/${uid}/`),
+    getMany(`trainer/${uid}/`),
+    getMany(`route/${uid}/`),
+  ]);
+  return {
+    progress: progress || { topics: {} },
+    selfStudy: selfStudy.map((x) => ({ taskId: x.taskId, grade: x.resubmitted ? null : x.grade })),
+    trainer: trainer.map((x) => ({ scenarioId: x.scenarioId, total: x.total, createdAt: x.createdAt })),
+    routes: routesList.filter((r) => r.grade).map((r) => ({ id: r.id, total: r.grade.total })),
+  };
+}
+
+async function myEvidence(req) {
+  const user = await requireUser(req);
+  return json(await evidenceFor(user.id));
+}
+
+async function allEvidence(req) {
+  await requireTeacher(req);
+  const users = (await getMany("user/")).filter((u) => u.role === "student");
+  const items = await Promise.all(users.map(async (u) => ({ user: publicUser(u), evidence: await evidenceFor(u.id) })));
+  return json(items);
+}
+
 // ---------- Router ----------
 
 const routes = [
@@ -904,6 +933,8 @@ const routes = [
   ["GET", /^admin\/routes$/, adminRoutes],
   ["PUT", /^admin\/routes\/([\w-]+)\/([\w-]+)\/grade$/, gradeRoute],
 
+  ["GET", /^evidence$/, myEvidence],
+  ["GET", /^admin\/evidence$/, allEvidence],
   ["GET", /^admin\/overview$/, overview],
   ["GET", /^admin\/surveys$/, adminSurveys],
   ["POST", /^admin\/surveys$/, (req) => saveSurvey(req, null)],

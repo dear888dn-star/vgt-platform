@@ -76,7 +76,12 @@ export function setNote(key, text) {
 }
 
 export function topicCompletion(topic) {
-  const t = state?.topics[topic.id];
+  return completionFrom(state, topic);
+}
+
+/** Berilgan progress obyektidan mavzu bajarilish foizi (o'qituvchi paneli uchun ham). */
+export function completionFrom(progress, topic) {
+  const t = progress?.topics?.[topic.id];
   if (!t) return 0;
   const parts = [t.read, t.quiz !== null && t.quiz >= 60, t.flashcards, ...topic.methods.map((m) => Boolean(t.methods?.[m.id]?.done))];
   return Math.round((parts.filter(Boolean).length / parts.length) * 100);

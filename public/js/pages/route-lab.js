@@ -4,6 +4,8 @@
 import { h, mount, toast, loading, fmtDate, confirmDialog, emptyState, downloadFile } from "../ui.js";
 import { api } from "../api.js";
 import { toCSV } from "../stats.js";
+import { ROUTE_LAB_MAP, FUNCTIONS } from "../../data/standard.js";
+import { competencyChips } from "../competency.js";
 import {
   CITIES, OBJECT_TYPES, TYPE_NAME, TYPE_COLOR, SERVICE_TYPES, MODES,
   computeVariant, optimizeOrder, googleMapsUrl, fmtKm, fmtMin, hasCoords, loadLeaflet, makeMap, numberedIcon, geojson,
@@ -268,6 +270,7 @@ const STEP_VIEWS = {
         h("p", {}, TASK_TEXT),
         p.caseText && h("div", { class: "case-text" }, h("b", {}, "Keys: "), p.caseText),
         h("div", { class: "alert alert-info small" }, h("b", {}, `${level.n}-daraja — ${level.name}: `), level.text),
+        h("div", { class: "small" }, h("b", {}, "Kasb standarti: "), FUNCTIONS.filter((f) => ROUTE_LAB_MAP.functions.includes(f.code)).map((f) => `${f.code} ${f.title}`).join("; "), competencyChips(ROUTE_LAB_MAP.kk)),
         h("p", { class: "small muted" }, "Aniq obyektlar, masofalar va vaqtlar siz tanlagan hudud va foydalanilgan ishonchli ma'lumotlar asosida aniqlanadi. Real marshrutda obyektlarning joriy ish rejimi va yo'l holati alohida tekshiriladi.")
       ),
       h(

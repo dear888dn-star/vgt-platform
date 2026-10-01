@@ -11,6 +11,7 @@ import * as teacher from "./pages/teacher.js";
 import * as profile from "./pages/profile.js";
 import * as diagnostics from "./pages/diagnostics.js";
 import * as routeLab from "./pages/route-lab.js";
+import * as standard from "./pages/standard.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -23,6 +24,7 @@ const routes = [
   [/^\/trainer\/([\w-]+)$/, trainer.renderSession, { auth: true }],
   [/^\/surveys$/, diagnostics.render, { auth: true }],
   [/^\/diagnostics$/, diagnostics.render, { auth: true }],
+  [/^\/standard$/, standard.render],
   [/^\/route-lab$/, routeLab.renderList, { auth: true }],
   [/^\/route-lab\/([\w-]+)$/, routeLab.renderProject, { auth: true }],
   [/^\/surveys\/([\w-]+)$/, surveys.renderSurvey, { auth: true }],
@@ -36,6 +38,7 @@ const NAV = [
   ["#/route-lab", "Marshrut", "🗺️"],
   ["#/trainer", "Trenajyor", "🎙️"],
   ["#/diagnostics", "Diagnostika", "📝"],
+  ["#/standard", "Standart", "🎯"],
 ];
 
 const main = document.getElementById("main");
@@ -47,7 +50,7 @@ function renderNav() {
   const path = location.hash || "#/";
   const user = session.user;
   const items = [...NAV];
-  if (user?.role === "teacher") items.push(["#/teacher", "O'qituvchi paneli", "📊"]);
+  if (user?.role === "teacher") items.push(["#/teacher", "Panel", "📊"]);
   const active = (href) => (href === "#/" ? path === "#/" || path === "" : path.startsWith(href));
   mount(
     nav,

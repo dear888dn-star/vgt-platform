@@ -1,6 +1,8 @@
 // Virtual gidlik trenajyori: ssenariy tanlash, real vaqtdagi AI suhbat, kutilmagan hodisalar, baholash.
 import { h, mount, toast, loading, fmtDate, modal, emptyState } from "../ui.js";
 import { api } from "../api.js";
+import { competencyChips } from "../competency.js";
+import { FUNCTIONS } from "../../data/standard.js";
 
 let cache = null;
 async function scenarios() {
@@ -28,6 +30,7 @@ export async function renderList(el) {
             h("div", { class: "row between" }, h("span", { class: "scenario-icon" }, s.icon), h("span", { class: `badge ${LEVEL_CLASS[s.level]}` }, s.level)),
             h("h3", {}, s.title),
             h("p", { class: "muted small" }, "📍 ", s.location),
+            s.functions?.length > 0 && h("p", { class: "small" }, "🎯 ", s.functions.join(", "), " · ", s.competencies.filter((c) => c.startsWith("KK")).join(", ")),
             h("p", { class: "small clamp" }, s.brief),
             h("div", { class: "row between small" }, h("span", { class: "chip chip-soft" }, s.category), h("span", { class: "muted" }, `⏱ ${s.duration} daq · ${s.language}`)),
             best[s.id] !== undefined && h("div", { class: "best" }, `Eng yaxshi natija: ${best[s.id]}/100`)
@@ -130,6 +133,7 @@ export function evaluationView(session, criteria = DEFAULT_CRITERIA) {
       h("div", { class: `score-ring ${scoreClass(session.total)}`, style: { "--pct": session.total } }, h("b", {}, session.total), h("span", {}, "/100")),
       h("div", {}, h("h3", {}, session.total >= 80 ? "A'lo natija! 🏆" : session.total >= 60 ? "Yaxshi natija 👍" : "Mashq qilishni davom eting 💪"), h("p", {}, ev.summary), ev.demo && h("span", { class: "badge badge-warn" }, "Demo-baholash"))
     ),
+    ev.standard && h("div", { class: "alert alert-info" }, h("b", {}, "🎯 Kasb standarti talablariga moslik: "), ev.standard),
     h("div", { class: "criteria" }, crit.map((c) => h("div", { class: "criterion" }, h("div", { class: "row between small" }, h("span", {}, c.title), h("b", {}, `${ev.scores[c.key]}/${c.max}`)), h("div", { class: "progress" }, h("div", { class: "progress-fill", style: { width: `${(ev.scores[c.key] / c.max) * 100}%` } }))))),
     h(
       "div",
@@ -169,6 +173,11 @@ export async function renderSession(el, id) {
       h("h3", {}, "Maqsadlar"),
       h("ul", { class: "checklist" }, s.objectives.map((o) => h("li", {}, o))),
       s.route && [h("h3", {}, "Marshrut"), h("ol", { class: "route" }, s.route.map((r) => h("li", {}, h("b", {}, r.title), h("small", { class: "muted" }, ` — ${r.hint}`))))],
+      s.functions?.length > 0 && [
+        h("h3", {}, "Kasb standarti talablari (Gid tarjimon)"),
+        h("ul", { class: "small" }, FUNCTIONS.filter((f) => s.functions.includes(f.code)).map((f) => h("li", {}, h("b", {}, `${f.code} ${f.title}: `), f.actions.slice(0, 4).join("; "), "."))),
+        competencyChips(s.competencies),
+      ],
       h("h3", {}, "Baholash mezonlari"),
       h("div", { class: "chips" }, criteria.map((c) => h("span", { class: "chip chip-soft" }, `${c.title} (${c.max})`))),
       h("div", { class: "alert alert-info" }, "Mashg'ulot davomida kutilmagan hodisalar yuz berishi mumkin. Vaqt real hisoblanadi. \"Ustoz maslahati\"dan foydalanish mumkin, ammo bu baholashda hisobga olinadi."),

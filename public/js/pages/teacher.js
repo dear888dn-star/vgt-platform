@@ -7,6 +7,7 @@ import { LIKERT_LABELS } from "./surveys.js";
 import { showSession, scoreClass } from "./trainer.js";
 import { resultSheet } from "./diagnostics.js";
 import { projectSummary, gradeCard } from "./route-lab.js";
+import { mapFromEvidence, competencyTable } from "../competency.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
@@ -15,6 +16,7 @@ const TABS = [
   ["", "📊 Umumiy"],
   ["diagnostics", "🧪 Kompleks diagnostika"],
   ["routes", "🗺 Marshrut loyihalari"],
+  ["competencies", "🎯 Kompetensiyalar"],
   ["results", "📈 So'rovnoma natijalari"],
   ["experiment", "📐 So'rovnomalar tahlili"],
   ["builder", "🛠 So'rovnoma konstruktori"],
@@ -32,7 +34,7 @@ export async function render(el, tab = "", param) {
     content
   );
   mount(content, loading());
-  const views = { "": overview, diagnostics, routes: routeProjects, results, experiment, builder, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   await view(content, param);
@@ -1191,4 +1193,53 @@ function gradeRouteModal(p, rubric, levels, reload) {
     ),
     { wide: true }
   );
+}
+
+// ---------------- Kasb standarti bo'yicha kompetensiyalar ----------------
+
+async function competencyOverview(el) {
+  const items = (await api.get("admin/evidence")).map((x) => ({ ...x, map: mapFromEvidence(x.evidence) }));
+  if (!items.length) return mount(el, emptyState("🎯", "O'quvchilar yo'q"));
+  const codes = items[0].map.map((c) => c.code);
+  const cohortKeys = ["experimental", "control", "unassigned"].filter((k) => items.some((x) => (x.user.cohort || "unassigned") === k));
+  const avgFor = (list, code) => {
+    const v = list.map((x) => x.map.find((c) => c.code === code).value).filter((x) => x != null);
+    return v.length ? { m: mean(v), n: v.length } : null;
+  };
+  const summary = h(
+    "div",
+    { class: "card table-wrap" },
+    h("h3", {}, "Kompetensiyalar bo'yicha o'rtacha ko'rsatkich (0–100)"),
+    h("p", { class: "small muted" }, "Har bir o'quvchi uchun mavzular, baholangan mustaqil ishlar, trenajyor (ssenariy bo'yicha eng yaxshi natija) va baholangan marshrut loyihalari asosida hisoblanadi. Qavs ichida — dalili bor o'quvchilar soni."),
+    h(
+      "table",
+      { class: "table" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Kompetensiya"), cohortKeys.map((k) => h("th", {}, COHORTS[k])), h("th", {}, "Jami"))),
+      h("tbody", {}, codes.map((code) => {
+        const c = items[0].map.find((x) => x.code === code);
+        return h("tr", {}, h("td", { title: c.title }, h("b", {}, code), " ", h("span", { class: "small muted" }, c.title.length > 70 ? c.title.slice(0, 70) + "…" : c.title)),
+          [...cohortKeys.map((k) => items.filter((x) => (x.user.cohort || "unassigned") === k)), items].map((list) => {
+            const a = avgFor(list, code);
+            return h("td", {}, a ? `${fmt(a.m, 0)} (${a.n})` : "—");
+          }));
+      }))
+    ),
+    h("div", { class: "row end" }, h("button", { class: "btn ghost", onclick: () => downloadFile("kompetensiyalar.csv", toCSV([["Kod", "F.I.Sh.", "Guruh", "Tadqiqot guruhi", ...codes], ...items.map((x) => [x.user.code, x.user.name, x.user.group, COHORTS[x.user.cohort || "unassigned"], ...x.map.map((c) => (c.value == null ? "" : Math.round(c.value)))])])) }, "⬇ CSV"))
+  );
+  const list = h(
+    "div",
+    { class: "card table-wrap" },
+    h("h3", {}, "O'quvchilar"),
+    h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, ["O'quvchi", "Guruh", "Tadqiqot guruhi", "Shakllangan KK", "Shakllangan UK", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, items.sort((a, b) => a.user.name.localeCompare(b.user.name)).map((x) => {
+        const kk = x.map.filter((c) => c.kind === "KK");
+        const uk = x.map.filter((c) => c.kind === "UK");
+        return h("tr", {}, h("td", {}, `${x.user.name} (${x.user.code || "—"})`), h("td", {}, x.user.group || "—"), h("td", {}, COHORTS[x.user.cohort || "unassigned"]),
+          h("td", {}, `${kk.filter((c) => c.level === "Shakllangan").length} / ${kk.length}`), h("td", {}, `${uk.filter((c) => c.level === "Shakllangan").length} / ${uk.length}`),
+          h("td", {}, h("button", { class: "btn small ghost", onclick: () => modal(`Kompetensiya xaritasi — ${x.user.name}`, h("div", { class: "stack" }, h("h4", {}, "Kasbiy kompetensiyalar"), competencyTable(kk), h("h4", {}, "Umumiy kompetensiyalar"), competencyTable(uk)), { wide: true }) }, "Xarita")));
+      }))
+    )
+  );
+  mount(el, h("p", { class: "muted" }, "Gid tarjimon kasb standarti (NO1.232.1901/Б-22) va 51010304-Turizm ta'lim dasturi bo'yicha kompetensiyalar. ", h("a", { href: "#/standard?tab=functions" }, "Standartni ko'rish →")), summary, list);
 }

@@ -1,3 +1,5 @@
+import { SCENARIO_MAP, COMPETENCY, FUNCTIONS } from "../../public/data/standard.js";
+
 // Virtual gidlik trenajyori ssenariylari.
 // Har bir ssenariy: talabaga beriladigan vaziyat (brief), AI o'ynaydigan personaj (persona),
 // real vaqtda kiritiladigan kutilmagan hodisalar (twists) va baholash uchun kalit so'zlar.
@@ -353,7 +355,19 @@ export const SCENARIOS = [
 export function publicScenario(s) {
   // Talabaga persona tafsilotlari emas, faqat vaziyat ko'rsatiladi.
   const { persona, keywords, fallback, ...rest } = s;
-  return rest;
+  return { ...rest, competencies: SCENARIO_MAP[s.id]?.kk || [], functions: SCENARIO_MAP[s.id]?.functions || [] };
+}
+
+/** Ssenariyga tegishli kasb standarti talablari (baholash uchun). */
+export function standardContext(s) {
+  const map = SCENARIO_MAP[s.id];
+  if (!map) return "";
+  const fx = FUNCTIONS.filter((f) => map.functions.includes(f.code));
+  return [
+    "Gid tarjimon kasb standarti (NO1.232.1901/Б-22) bo'yicha tegishli talablar:",
+    ...fx.map((f) => `- Mehnat funksiyasi ${f.code} “${f.title}”: ${f.actions.join("; ")}.`),
+    ...map.kk.map((c) => `- ${c}: ${COMPETENCY[c]?.title}`),
+  ].join("\n");
 }
 
 export function personaSystemPrompt(s) {
@@ -390,12 +404,15 @@ ${s.objectives.map((o, i) => `${i + 1}. ${o}`).join("\n")}
 BAHOLASH MEZONLARI (har biri 0–20 ball):
 ${CRITERIA.map((c) => `- ${c.key}: ${c.title}`).join("\n")}
 
+${standardContext(s)}
+
 QO'SHIMCHA MA'LUMOT: o'quvchi ${meta.hintsUsed} marta "Ustoz maslahati"dan foydalandi; mashg'ulot davomiyligi ${meta.durationMin} daqiqa.
 
 MASHG'ULOT YOZUVI:
 ${transcript}
 
-Baholashda faqat o'quvchi ("GID" deb belgilangan) xabarlarini baholang. Fikr-mulohazalarni o'zbek tilida, o'quvchiga murojaat qilib ("siz") yozing. Kuchli tomonlar va xatolarni yozuvdan aniq misollar bilan ko'rsating. Agar o'quvchi juda kam yozgan bo'lsa, ballarni shunga mos ravishda past qo'ying.`;
+Baholashda faqat o'quvchi ("GID" deb belgilangan) xabarlarini baholang. Fikr-mulohazalarni o'zbek tilida, o'quvchiga murojaat qilib ("siz") yozing. Kuchli tomonlar va xatolarni yozuvdan aniq misollar bilan ko'rsating. Agar o'quvchi juda kam yozgan bo'lsa, ballarni shunga mos ravishda past qo'ying.
+"standard" maydonida o'quvchining harakatlari yuqoridagi kasb standarti mehnat harakatlari va kompetensiyalariga qanchalik mos kelganini 2–4 jumlada baholang (qaysi mehnat harakatini bajardi, qaysi birini o'tkazib yubordi).`;
 }
 
 export const EVALUATION_SCHEMA = {
@@ -409,11 +426,12 @@ export const EVALUATION_SCHEMA = {
       required: CRITERIA.map((c) => c.key),
     },
     summary: { type: "string" },
+    standard: { type: "string" },
     strengths: { type: "array", items: { type: "string" } },
     improvements: { type: "array", items: { type: "string" } },
     recommendations: { type: "array", items: { type: "string" } },
   },
-  required: ["scores", "summary", "strengths", "improvements", "recommendations"],
+  required: ["scores", "summary", "standard", "strengths", "improvements", "recommendations"],
 };
 
 export function hintPrompt(s) {
