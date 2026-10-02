@@ -4,6 +4,18 @@ import { api } from "../api.js";
 import { competencyChips } from "../competency.js";
 import { FUNCTIONS } from "../../data/standard.js";
 import { createVoice, voiceSupport } from "../voice.js";
+import { sceneSVG } from "../landmarks.js";
+
+// Har bir ssenariy uchun manzara (obida va kun vaqti)
+const SCENE_OF = {
+  "registon-tour": ["registan", "day"], "lost-tourist": ["bukhara", "day"], overbooking: ["tashkent", "night"], "double-payment": ["tashkent", "day"],
+  "khiva-virtual": ["khiva", "sunset"], "foreign-arrival": ["tashkent", "sunset"], "negative-review": ["registan", "sunset"], "accessible-tour": ["shahizinda", "day"],
+  "itinerary-design": ["aksaray", "sunset"], "heat-emergency": ["bukhara", "day"],
+};
+export const scenarioScene = (id, animated = false) => {
+  const [landmark, time] = SCENE_OF[id] || ["registan", "day"];
+  return sceneSVG({ landmark, time, animated, caravan: animated });
+};
 
 let cache = null;
 async function scenarios() {
@@ -27,8 +39,8 @@ export async function renderList(el) {
         .map((s) =>
           h(
             "a",
-            { href: `#/trainer/${s.id}`, class: "card scenario-card" },
-            h("div", { class: "row between" }, h("span", { class: "scenario-icon" }, s.icon), h("span", { class: `badge ${LEVEL_CLASS[s.level]}` }, s.level)),
+            { href: `#/trainer/${s.id}`, class: "card scenario-card tilt" },
+            h("div", { class: "sc-scene", html: scenarioScene(s.id) }, h("span", { class: "sc-icon" }, s.icon), h("span", { class: `badge ${LEVEL_CLASS[s.level]}` }, s.level)),
             h("h3", {}, s.title),
             h("p", { class: "muted small" }, "📍 ", s.location),
             s.functions?.length > 0 && h("p", { class: "small" }, "🎯 ", s.functions.join(", "), " · ", s.competencies.filter((c) => c.startsWith("KK")).join(", ")),
@@ -166,6 +178,7 @@ export async function renderSession(el, id) {
     h(
       "div",
       { class: "card briefing" },
+      h("div", { class: "briefing-scene", html: scenarioScene(s.id, true) }),
       h("div", { class: "row between wrap" }, h("div", { class: "row" }, h("span", { class: "scenario-icon xl" }, s.icon), h("div", {}, h("div", { class: "eyebrow" }, s.category), h("h1", {}, s.title))), h("span", { class: `badge ${LEVEL_CLASS[s.level]}` }, s.level)),
       h("p", { class: "muted" }, "📍 ", s.location, ` · ⏱ ${s.duration} daqiqa · 🗣 muloqot tili: ${s.language}`),
       h("h3", {}, "Sizning rolingiz"),

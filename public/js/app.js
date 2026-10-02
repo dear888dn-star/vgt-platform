@@ -5,6 +5,7 @@ import { watch, transition, initTopbar } from "./motion.js";
 import { initResultsBoard } from "./results-board.js";
 import { initCelebrations } from "./celebrate.js";
 import { initTools } from "./search.js";
+import { initLightbox } from "./media.js";
 import * as home from "./pages/home.js";
 import * as auth from "./pages/auth.js";
 import * as topics from "./pages/topics.js";
@@ -19,6 +20,8 @@ import * as standard from "./pages/standard.js";
 import * as passport from "./pages/passport.js";
 import * as review from "./pages/review.js";
 import * as cert from "./pages/cert.js";
+import * as tour from "./pages/tour.js";
+import * as media from "./pages/media.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -39,11 +42,14 @@ const routes = [
   [/^\/profile$/, profile.render, { auth: true }],
   [/^\/passport$/, passport.render, { auth: true }],
   [/^\/review$/, review.render],
+  [/^\/tour$/, tour.render],
+  [/^\/media$/, media.render],
   [/^\/cert\/([\w-]+)$/, cert.render],
 ];
 
 const NAV = [
   ["#/topics", "Mavzular", "📚"],
+  ["#/media", "Mediateka", "🎬"],
   ["#/self-study", "Mustaqil ta'lim", "🧩"],
   ["#/route-lab", "Marshrut", "🗺️"],
   ["#/trainer", "Trenajyor", "🎙️"],
@@ -121,6 +127,7 @@ main.setAttribute("tabindex", "-1");
 initTopbar();
 initTools();
 initCelebrations();
+initLightbox();
 initResultsBoard();
 watch(main);
 route();

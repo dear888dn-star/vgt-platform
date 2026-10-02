@@ -712,7 +712,8 @@ export const TOPICS = BOOK.topics.map((b) => {
     icon: layer.icon || "📘",
     title: layer.title || b.title,
     goal: layer.goal || "",
-    image: b.image,
+    // Qo'llanmada muqovasi yo'q mavzular uchun platforma illyustratsiyasi.
+    image: b.image || { 1: "/img/topics/t01.jpg", 12: "/img/topics/t12.jpg" }[b.num] || null,
     plan: b.plan,
     sections: b.sections,
     questions: b.questions,

@@ -76,7 +76,7 @@ export function speakerSegments(text, scenario) {
 
 const sentences = (t) => t.match(/[^.!?…]+[.!?…]*\s*/g)?.map((s) => s.trim()).filter(Boolean) || [t];
 
-export function createVoice(scenario, { onState } = {}) {
+export function createVoice(scenario, { onState, engine, persist = true } = {}) {
   const lang = LANGS[scenario.language] || "uz-UZ";
   const prefs = (() => {
     try {
@@ -85,7 +85,7 @@ export function createVoice(scenario, { onState } = {}) {
       return {};
     }
   })();
-  const state = { engine: prefs.engine || "auto", rate: prefs.rate || 1, autoListen: prefs.autoListen ?? true, speaking: false, listening: false };
+  const state = { engine: engine || prefs.engine || "auto", rate: prefs.rate || 1, autoListen: prefs.autoListen ?? true, speaking: false, listening: false };
   let voices = [];
   let voicePlan = null;
   let audio;
@@ -98,6 +98,7 @@ export function createVoice(scenario, { onState } = {}) {
     onState?.(state);
   };
   const savePrefs = () => {
+    if (!persist) return;
     try {
       localStorage.setItem("vgt.voice", JSON.stringify({ engine: state.engine, rate: state.rate, autoListen: state.autoListen }));
     } catch {}

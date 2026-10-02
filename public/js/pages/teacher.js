@@ -10,6 +10,7 @@ import { projectSummary, gradeCard } from "./route-lab.js";
 import { mapFromEvidence, competencyTable } from "../competency.js";
 import { TOPICS } from "../../data/topics.js";
 import { slideViewer, uploadSlides, fmtSize } from "../slides.js";
+import { allVideos, videoCard, uploadVideo, invalidateVideos } from "../media.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
@@ -23,6 +24,7 @@ const TABS = [
   ["experiment", "📐 So'rovnomalar tahlili"],
   ["builder", "🛠 So'rovnoma konstruktori"],
   ["slides", "🖥️ Taqdimotlar"],
+  ["videos", "📹 Video darslar"],
   ["students", "👥 O'quvchilar"],
   ["trainer", "🎙 Trenajyor natijalari"],
   ["self-study", "🧩 Mustaqil ishlar"],
@@ -37,7 +39,7 @@ export async function render(el, tab = "", param) {
     content
   );
   mount(content, loading());
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   await view(content, param);
@@ -223,6 +225,114 @@ async function slidesManager(el) {
       " fayllar (20 MB gacha) PowerPoint Online orqali ko'rsatiladi. Faylni kartaga sudrab tashlash ham mumkin."
     ),
     h("div", { class: "stack sm-list" }, TOPICS.map(row))
+  );
+}
+
+// ---------------- Video darslar ----------------
+
+async function videosManager(el) {
+  const videos = await allVideos({ fresh: true });
+  const byTopic = {};
+  for (const v of videos) (byTopic[v.topicId] ||= []).push(v);
+
+  const row = (t) => {
+    const list = h("div", { class: "video-grid compact" });
+    const bar = h("div", { class: "sm-upload hidden" }, h("div", { class: "sm-upload-fill" }), h("span", {}, "0%"));
+    const drawList = () => {
+      const items = byTopic[t.id] || [];
+      list.replaceChildren(
+        ...(items.length
+          ? items.map((v) =>
+              videoCard(v, h("div", { class: "row wrap vc-admin" },
+                h("button", { class: "btn small ghost", onclick: async () => {
+                  const title = prompt("Video nomi:", v.title);
+                  if (title === null) return;
+                  try {
+                    Object.assign(v, await api.put(`admin/videos/${t.id}/${v.id}`, { title }));
+                    invalidateVideos();
+                    drawList();
+                  } catch (e) {
+                    toast(e.message, "error");
+                  }
+                } }, "✏️"),
+                h("button", { class: "btn small ghost danger-text", onclick: async () => {
+                  if (!(await confirmDialog(`“${v.title}” videosini o'chirasizmi?`))) return;
+                  try {
+                    await api.del(`admin/videos/${t.id}/${v.id}`);
+                    byTopic[t.id] = byTopic[t.id].filter((x) => x.id !== v.id);
+                    invalidateVideos();
+                    drawList();
+                    toast("Video o'chirildi", "ok");
+                  } catch (e) {
+                    toast(e.message, "error");
+                  }
+                } }, "🗑")))
+            )
+          : [h("p", { class: "muted small" }, "Hali video yo'q")])
+      );
+    };
+    const fileInput = h("input", { type: "file", accept: "video/mp4,video/webm,video/ogg,.mp4,.webm,.mov", class: "hidden", onchange: async () => {
+      const f = fileInput.files[0];
+      if (!f) return;
+      bar.classList.remove("hidden");
+      const setP = (x) => {
+        bar.firstChild.style.transform = `scaleX(${x})`;
+        bar.lastChild.textContent = `${Math.round(x * 100)}%`;
+      };
+      setP(0);
+      try {
+        const v = await uploadVideo(t.id, f, { onProgress: setP });
+        (byTopic[t.id] ||= []).push(v);
+        invalidateVideos();
+        drawList();
+        toast(`${t.num}-mavzu: video joylandi`, "ok");
+      } catch (e) {
+        toast(e.message, "error");
+      } finally {
+        setTimeout(() => bar.classList.add("hidden"), 600);
+        fileInput.value = "";
+      }
+    } });
+    const addLink = () => {
+      const url = h("input", { type: "url", required: true, placeholder: "https://www.youtube.com/watch?v=..." });
+      const title = h("input", { placeholder: "Video nomi", required: true });
+      const desc = h("textarea", { rows: 2, placeholder: "Qisqa izoh (ixtiyoriy)" });
+      const close = modal(
+        `${t.num}-mavzu: video havolasi`,
+        h("form", { onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            const v = await api.post(`admin/videos/${t.id}/link`, { url: url.value.trim(), title: title.value.trim(), description: desc.value.trim() });
+            (byTopic[t.id] ||= []).push(v);
+            invalidateVideos();
+            drawList();
+            close();
+            toast("Video qo'shildi", "ok");
+          } catch (err) {
+            toast(err.message, "error");
+          }
+        } },
+          h("p", { class: "muted small" }, "YouTube (oddiy, Shorts yoki youtu.be havola), Vimeo yoki to'g'ridan-to'g'ri .mp4 havolasi. YouTube videolari platformada o'rnatilgan pleyerda ochiladi."),
+          h("label", { class: "field" }, h("span", {}, "Havola"), url),
+          h("label", { class: "field" }, h("span", {}, "Nomi"), title),
+          h("label", { class: "field" }, h("span", {}, "Izoh"), desc),
+          h("div", { class: "row end" }, h("button", { class: "btn", type: "submit" }, "Qo'shish")))
+      );
+    };
+    drawList();
+    return h(
+      "div",
+      { class: "card vm-row" },
+      h("div", { class: "row between wrap" }, h("div", {}, h("div", { class: "eyebrow" }, `${t.num}-mavzu`), h("h3", {}, t.title)), h("div", { class: "row wrap" }, h("button", { class: "btn small", onclick: addLink }, "🔗 YouTube / havola"), h("button", { class: "btn small ghost", onclick: () => fileInput.click() }, "📤 Video fayl"), fileInput)),
+      bar,
+      list
+    );
+  };
+
+  mount(
+    el,
+    h("div", { class: "alert alert-info" }, h("b", {}, "Har bir mavzuga bir nechta video dars qo'shing. "), "Eng qulayi — videoni YouTube'ga joylab, havolasini qo'shish. Kichik videolarni (MP4/WebM, 80 MB gacha) to'g'ridan-to'g'ri yuklash ham mumkin: muqova rasmi va davomiylik avtomatik aniqlanadi. Videolar mavzu sahifasida va “Mediateka”da chiqadi."),
+    h("div", { class: "stack" }, TOPICS.map(row))
   );
 }
 

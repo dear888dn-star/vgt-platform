@@ -3,6 +3,60 @@ import { session } from "../api.js";
 import { COURSE, TOPICS } from "../../data/topics.js";
 import { loadProgress, topicCompletion, loadGame } from "../progress.js";
 import { dueCount } from "./review.js";
+import { mountScene, LANDMARK_NAMES } from "../landmarks.js";
+import { introVideo } from "../media.js";
+
+const SHOWCASE = [
+  ["registan", "Samarqand"],
+  ["khiva", "Xiva"],
+  ["bukhara", "Buxoro"],
+  ["guramir", "Samarqand"],
+  ["shahizinda", "Samarqand"],
+  ["aksaray", "Shahrisabz"],
+];
+const timeOfDay = () => {
+  const hr = new Date().getHours();
+  return hr >= 19 || hr < 6 ? "night" : hr >= 17 ? "sunset" : "day";
+};
+
+/** Bosh sahifa manzarasi: obidalar navbat bilan almashadi, sichqoncha bilan parallaks. */
+function heroScene() {
+  let i = 0;
+  const time = timeOfDay();
+  const stage = h("div", { class: "scene-stage" });
+  const caption = h("div", { class: "scene-caption" });
+  const dots = h("div", { class: "scene-dots", role: "tablist", "aria-label": "Obidalar" });
+  let timer;
+  const show = (n) => {
+    i = (n + SHOWCASE.length) % SHOWCASE.length;
+    const [key, city] = SHOWCASE[i];
+    const layer = h("div", { class: "scene-layer entering" });
+    mountScene(layer, { landmark: key, time });
+    stage.append(layer);
+    requestAnimationFrame(() => requestAnimationFrame(() => layer.classList.remove("entering")));
+    const old = [...stage.children].slice(0, -1);
+    setTimeout(() => old.forEach((o) => o.remove()), 1300);
+    caption.replaceChildren(h("b", {}, LANDMARK_NAMES[key]), h("span", {}, `📍 ${city}`));
+    dots.querySelectorAll("button").forEach((d, k) => d.classList.toggle("active", k === i));
+    clearInterval(timer);
+    timer = setInterval(() => (stage.isConnected ? show(i + 1) : clearInterval(timer)), 7000);
+  };
+  SHOWCASE.forEach(([key], k) => dots.append(h("button", { "aria-label": LANDMARK_NAMES[key], onclick: () => show(k) })));
+  const wrap = h(
+    "div",
+    { class: "hero-visual scene-frame" },
+    stage,
+    h("div", { class: "scene-vignette", "aria-hidden": "true" }),
+    caption,
+    dots,
+    h("a", { href: "#/tour", class: "scene-cta" }, "🧭 Virtual sayohatga chiqish"),
+    h("span", { class: "float-chip c1", "aria-hidden": "true" }, "🎙️ AI gid"),
+    h("span", { class: "float-chip c2", "aria-hidden": "true" }, "🗺️ Marshrut"),
+    h("span", { class: "float-chip c3", "aria-hidden": "true" }, "📱 Raqamli turizm")
+  );
+  show(0);
+  return wrap;
+}
 
 export async function render(el) {
   const user = session.user;
@@ -22,12 +76,6 @@ export async function render(el) {
     ["🎯", "Kasb standarti", "Gid tarjimon kasb standarti: mehnat funksiyalari, kompetensiyalar va shaxsiy kompetensiya xaritangiz.", "#/standard"],
   ];
 
-  const orbit = (cls, icons) =>
-    h("div", { class: `orbit ${cls}` }, icons.map((ic, i) => {
-      const a = (i / icons.length) * Math.PI * 2;
-      return h("span", { class: "orbit-item", style: { left: `${50 + Math.cos(a) * 50}%`, top: `${50 + Math.sin(a) * 50}%` } }, ic);
-    }));
-
   mount(
     el,
     h(
@@ -43,7 +91,8 @@ export async function render(el) {
           "div",
           { class: "row wrap" },
           h("a", { href: "#/topics", class: "btn lg" }, "📚 O'qishni boshlash"),
-          h("a", { href: "#/trainer", class: "btn ghost lg" }, "🎙️ Trenajyorni sinash")
+          h("a", { href: "#/trainer", class: "btn ghost lg" }, "🎙️ Trenajyorni sinash"),
+          h("button", { class: "btn ghost lg play-btn", onclick: introVideo }, h("span", { class: "play-ring" }, "▶"), "Platforma haqida video")
         ),
         h(
           "div",
@@ -51,14 +100,7 @@ export async function render(el) {
           [[TOPICS.length, "mavzu"], [tests, "test savoli"], [questions, "nazorat savoli"], [10, "trenajyor ssenariysi"]].map(([n, l]) => h("div", { class: "counter" }, h("b", { "data-count": n }, "0"), h("span", {}, l)))
         )
       ),
-      h(
-        "div",
-        { class: "hero-visual", "aria-hidden": "true" },
-        orbit("o1", ["🕌", "✈️", "🗺️", "🏨", "📱", "🎧"]),
-        orbit("o2", ["🤖", "☁️", "🔐", "📊"]),
-        orbit("o3", ["🧭", "🎯", "📸"]),
-        h("div", { class: "hero-core" }, "🧭")
-      )
+      heroScene()
     ),
     user &&
       h(

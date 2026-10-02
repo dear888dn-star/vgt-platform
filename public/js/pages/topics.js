@@ -2,6 +2,8 @@ import { h, mount, toast, progressBar } from "../ui.js";
 import { api, session } from "../api.js";
 import { slideViewer } from "../slides.js";
 import { tutorDrawer } from "../tutor.js";
+import { lessonPlayer } from "../lesson-player.js";
+import { allVideos, videoCard } from "../media.js";
 import { TOPICS, METHOD_INFO, COURSE, BOOK_INTRO, LITERATURE } from "../../data/topics.js";
 import { loadProgress, topicState, updateTopic, topicCompletion, setNote } from "../progress.js";
 import { renderMethod } from "../methods.js";
@@ -48,6 +50,8 @@ export async function renderList(el) {
 }
 
 const CHAPTERS = [
+  ["video", "🎬", "Animatsion dars"],
+  ["videos", "📹", "Video darslar"],
   ["slides", "🖥️", "Taqdimot"],
   ["theory", "📖", "Nazariya"],
   ["glossary", "🃏", "Tushunchalar"],
@@ -68,9 +72,11 @@ export async function renderTopic(el, id) {
   const next = TOPICS[idx + 1];
   const words = topic.sections.reduce((n, s) => n + stripTags(s.html).split(/\s+/).filter(Boolean).length, 0);
   const minutes = Math.max(1, Math.round(words / 160));
-  const slides = await api.get(`slides/${topic.id}`).catch(() => null);
+  const [slides, videoList] = await Promise.all([api.get(`slides/${topic.id}`).catch(() => null), allVideos()]);
+  const videos = videoList.filter((v) => v.topicId === topic.id);
+  const player = lessonPlayer(topic, { onComplete: () => updateTopic(topic.id, (s) => (s.watched = true)) });
   const viewer = slides && slideViewer(slides);
-  const counts = { slides: slides?.pages || (slides ? "▶" : 0), theory: topic.sections.length, glossary: topic.glossary.length, methods: topic.methods.length, questions: topic.questions.length, quiz: topic.quiz.length, self: topic.selfStudy.length };
+  const counts = { video: "▶", videos: videos.length, slides: slides?.pages || (slides ? "▶" : 0), theory: topic.sections.length, glossary: topic.glossary.length, methods: topic.methods.length, questions: topic.questions.length, quiz: topic.quiz.length, self: topic.selfStudy.length };
 
   // Progress halqasi
   const ring = h("div", { class: "hero-ring", style: { "--p": 0 } }, h("b", {}, "0%"), h("span", {}, "bajarildi"));
@@ -85,6 +91,8 @@ export async function renderTopic(el, id) {
   const body = h(
     "div",
     { class: "lesson-body" },
+    chapter("video", "🎬", "Animatsion dars", "Mavzuning qisqa animatsion bayoni: ovozli hikoya, subtitrlar va jonli infografika", player),
+    videos.length > 0 && chapter("videos", "📹", "Video darslar", `${videos.length} ta video — o'qituvchi tomonidan joylangan`, h("div", { class: "video-grid" }, videos.map((v) => videoCard(v)))),
     viewer && chapter("slides", "🖥️", "Taqdimot", slides.kind === "pdf" ? `${slides.pages ? `${slides.pages} ta slayd · ` : ""}strelkalar, svayp yoki ⛶ to'liq ekran` : slides.title, viewer),
     chapter("theory", "📖", "Nazariya", `${topic.sections.length} bo'lim · ~${minutes} daqiqa o'qish`, theoryBlock(topic)),
     chapter("glossary", "🃏", "Tayanch tushunchalar", `${topic.glossary.length} ta tushuncha — kartani bosing`, glossaryTab(topic)),
@@ -98,7 +106,7 @@ export async function renderTopic(el, id) {
     "nav",
     { class: "lesson-rail", "aria-label": "Dars bo'limlari" },
     h("div", { class: "rail-title" }, `${topic.num}-mavzu`),
-    CHAPTERS.filter(([key]) => key !== "slides" || viewer).map(([key, icon, label]) => [
+    CHAPTERS.filter(([key]) => (key !== "slides" || viewer) && (key !== "videos" || videos.length)).map(([key, icon, label]) => [
       h("a", { href: `#learn-${key}`, "data-key": key, onclick: (e) => { e.preventDefault(); document.getElementById(`learn-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); } }, h("span", { class: "rail-icon" }, icon), h("span", { class: "rail-label" }, label), h("span", { class: "rail-count" }, counts[key])),
       key === "theory" && h("div", { class: "rail-sub" }, topic.sections.filter((x) => x.title).map((x, i) => h("a", { href: `#sec-${i}`, "data-sec": i, onclick: (e) => { e.preventDefault(); document.getElementById(`sec-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); } }, x.title.replace(/^\d+\.\d+\.\s*/, "")))),
     ])
@@ -114,7 +122,8 @@ export async function renderTopic(el, id) {
     h(
       "header",
       { class: `lesson-hero ${topic.image ? "" : "no-image"}` },
-      topic.image && h("img", { class: "lesson-hero-img", src: topic.image, alt: "" }),
+      topic.image && h("img", { class: "lesson-hero-img", src: topic.image, alt: topic.title, "data-zoom": `${topic.num}-mavzu. ${topic.title}` }),
+      topic.image && h("button", { class: "lesson-hero-zoom", "aria-label": "Muqova rasmini kattalashtirish", onclick: (e) => e.currentTarget.parentElement.querySelector(".lesson-hero-img").click() }, "🔍"),
       h("div", { class: "lesson-hero-overlay" }),
       h(
         "div",
@@ -175,6 +184,7 @@ export async function renderTopic(el, id) {
     spy.disconnect();
     notesBtn.remove();
     tutor.destroy();
+    player.destroy();
     viewer?.destroy?.();
   };
 }

@@ -18,6 +18,7 @@ export const XP_RULES = [
   ["Mavzu testidan o'tish (≥60%)", 30],
   ["Testda 100% natija", 20],
   ["Tushunchalar kartalarini ko'rib chiqish", 10],
+  ["Animatsion darsni oxirigacha ko'rish", 10],
   ["Interaktiv metodni bajarish", 15],
   ["Mustaqil ish bahosi", "baho × 10"],
   ["Trenajyor mashg'uloti", "15 + eng yaxshi ball / 2"],
@@ -60,7 +61,7 @@ function topicPart(t, topic) {
   if (!t) return { xp: 0, pct: 0 };
   const methodsDone = topic.methods.filter((m) => t.methods?.[m.id]?.done).length;
   const quizPass = t.quiz !== null && t.quiz !== undefined && t.quiz >= 60;
-  const xp = (t.read ? 20 : 0) + (quizPass ? 30 : 0) + (t.quiz === 100 ? 20 : 0) + (t.flashcards ? 10 : 0) + methodsDone * 15;
+  const xp = (t.read ? 20 : 0) + (quizPass ? 30 : 0) + (t.quiz === 100 ? 20 : 0) + (t.flashcards ? 10 : 0) + (t.watched ? 10 : 0) + methodsDone * 15;
   const parts = [t.read, quizPass, t.flashcards, ...topic.methods.map((m) => Boolean(t.methods?.[m.id]?.done))];
   return { xp, pct: Math.round((parts.filter(Boolean).length / parts.length) * 100), quiz: t.quiz ?? null, methodsDone };
 }

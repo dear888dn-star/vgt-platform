@@ -1250,6 +1250,113 @@ async function slidesDelete(req, topicId) {
   return json({ ok: true });
 }
 
+// ---------- Video darslar ----------
+// O'qituvchi har bir mavzuga bir nechta video qo'shadi: YouTube/Vimeo havolasi yoki fayl (MP4/WebM, 80 MB gacha).
+
+const VIDEO_LIMIT = 80 * 1024 * 1024;
+const videoKey = (topicId, id) => `video/${topicId}/${id}`;
+const videoBin = (topicId, uploadId, i) => `mediabin/${topicId}/${uploadId}/${i}`;
+
+function videoLink(url) {
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/);
+  if (yt) return { kind: "youtube", embedUrl: `https://www.youtube-nocookie.com/embed/${yt[1]}?rel=0&modestbranding=1`, thumb: `https://i.ytimg.com/vi/${yt[1]}/hqdefault.jpg` };
+  const vm = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  if (vm) return { kind: "vimeo", embedUrl: `https://player.vimeo.com/video/${vm[1]}` };
+  if (/\.(mp4|webm|ogg)(\?|$)/i.test(url)) return { kind: "url", embedUrl: url };
+  return { kind: "link", embedUrl: url };
+}
+
+async function listVideos() {
+  const items = await getMany("video/");
+  return json({ videos: items.map(({ by, ...rest }) => rest).sort((a, b) => a.createdAt.localeCompare(b.createdAt)) });
+}
+
+async function videoChunk(req, topicId, id, uploadId, i) {
+  const meta = await db().get(videoKey(topicId, id));
+  if (!meta || meta.uploadId !== uploadId || Number(i) >= meta.chunks) throw new HttpError(404, "Video topilmadi");
+  const data = await db().getBinary(videoBin(topicId, uploadId, i));
+  if (!data) throw new HttpError(404, "Video bo'lagi topilmadi");
+  return new Response(data, { headers: { "content-type": "application/octet-stream", "cache-control": "public, max-age=31536000, immutable" } });
+}
+
+async function videoAddLink(req, topicId) {
+  const teacher = await requireTeacher(req);
+  if (!topicIdOk(topicId)) throw new HttpError(400, "Mavzu noto'g'ri");
+  const b = await body(req);
+  const url = str(b.url, 1000);
+  if (!/^https:\/\//i.test(url)) throw new HttpError(400, "Havola https:// bilan boshlanishi kerak");
+  const meta = { id: newId(), topicId, ...videoLink(url), url, title: str(b.title, 200) || "Video dars", description: str(b.description, 1000), createdAt: new Date().toISOString(), by: teacher.name };
+  await db().set(videoKey(topicId, meta.id), meta);
+  return json(meta, 201);
+}
+
+async function videoInit(req, topicId) {
+  await requireTeacher(req);
+  if (!topicIdOk(topicId)) throw new HttpError(400, "Mavzu noto'g'ri");
+  const b = await body(req);
+  const size = Number(b.size);
+  if (!/^video\/(mp4|webm|ogg|quicktime)$/.test(String(b.mime)) && !/\.(mp4|webm|ogv|mov)$/i.test(String(b.name))) throw new HttpError(400, "Faqat video fayl (MP4, WebM) yuklash mumkin");
+  if (!Number.isFinite(size) || size <= 0) throw new HttpError(400, "Fayl bo'sh");
+  if (size > VIDEO_LIMIT) throw new HttpError(413, "Video juda katta: eng ko'pi 80 MB. Kattaroq videolarni YouTube'ga joylab, havolasini qo'shing.");
+  return json({ uploadId: newId(), chunkSize: SLIDE_CHUNK, chunks: Math.ceil(size / SLIDE_CHUNK) });
+}
+
+async function videoPutChunk(req, topicId, uploadId, i) {
+  await requireTeacher(req);
+  if (!topicIdOk(topicId) || !/^[\w-]{6,64}$/.test(uploadId) || !/^\d{1,3}$/.test(i)) throw new HttpError(400, "So'rov noto'g'ri");
+  const data = await req.arrayBuffer();
+  if (!data.byteLength || data.byteLength > SLIDE_CHUNK) throw new HttpError(400, "Fayl bo'lagi hajmi noto'g'ri");
+  await db().setBinary(videoBin(topicId, uploadId, i), data);
+  return json({ ok: true });
+}
+
+async function videoCommit(req, topicId) {
+  const teacher = await requireTeacher(req);
+  if (!topicIdOk(topicId)) throw new HttpError(400, "Mavzu noto'g'ri");
+  const b = await body(req);
+  const uploadId = str(b.uploadId, 64);
+  const size = Number(b.size);
+  const chunks = Math.ceil(size / SLIDE_CHUNK);
+  const keys = new Set(await db().list(`mediabin/${topicId}/${uploadId}/`));
+  for (let i = 0; i < chunks; i++) if (!keys.has(videoBin(topicId, uploadId, i))) throw new HttpError(400, `Video to'liq yuklanmadi (${i + 1}-bo'lak yo'q)`);
+  const poster = typeof b.poster === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(b.poster) && b.poster.length < 200_000 ? b.poster : undefined;
+  const meta = {
+    id: newId(), topicId, kind: "file", uploadId, chunks, size,
+    mime: /^video\/[\w.+-]+$/.test(String(b.mime)) ? String(b.mime) : "video/mp4",
+    name: str(b.name, 200),
+    title: str(b.title, 200) || str(b.name, 200).replace(/\.\w+$/, ""),
+    description: str(b.description, 1000),
+    duration: Number.isFinite(b.duration) ? Math.round(b.duration) : undefined,
+    poster,
+    createdAt: new Date().toISOString(),
+    by: teacher.name,
+  };
+  await db().set(videoKey(topicId, meta.id), meta);
+  return json(meta, 201);
+}
+
+async function videoUpdate(req, topicId, id) {
+  await requireTeacher(req);
+  const meta = await db().get(videoKey(topicId, id));
+  if (!meta) throw new HttpError(404, "Video topilmadi");
+  const b = await body(req);
+  if (b.title !== undefined) meta.title = str(b.title, 200) || meta.title;
+  if (b.description !== undefined) meta.description = str(b.description, 1000);
+  await db().set(videoKey(topicId, id), meta);
+  return json(meta);
+}
+
+async function videoDelete(req, topicId, id) {
+  await requireTeacher(req);
+  const meta = await db().get(videoKey(topicId, id));
+  if (meta?.uploadId) {
+    const keys = await db().list(`mediabin/${topicId}/${meta.uploadId}/`);
+    await Promise.all(keys.map((k) => db().del(k)));
+  }
+  await db().del(videoKey(topicId, id));
+  return json({ ok: true });
+}
+
 // ---------- Ommaviy natijalar (texnikumlar kesimida) ----------
 
 const normCollege = (name) => String(name || "").toLowerCase().replace(/[‘’ʻʼ`´]/g, "'").replace(/\s+/g, " ").trim();
@@ -1332,6 +1439,15 @@ const routes = [
   ["POST", /^admin\/slides\/([\w-]+)\/commit$/, slidesCommit],
   ["PUT", /^admin\/slides\/([\w-]+)\/link$/, slidesLink],
   ["DELETE", /^admin\/slides\/([\w-]+)$/, slidesDelete],
+
+  ["GET", /^videos$/, listVideos],
+  ["GET", /^videos\/([\w-]+)\/([\w-]+)\/chunk\/([\w-]+)\/(\d+)$/, videoChunk],
+  ["POST", /^admin\/videos\/([\w-]+)\/link$/, videoAddLink],
+  ["POST", /^admin\/videos\/([\w-]+)\/init$/, videoInit],
+  ["PUT", /^admin\/videos\/([\w-]+)\/chunk\/([\w-]+)\/(\d+)$/, videoPutChunk],
+  ["POST", /^admin\/videos\/([\w-]+)\/commit$/, videoCommit],
+  ["PUT", /^admin\/videos\/([\w-]+)\/([\w-]+)$/, videoUpdate],
+  ["DELETE", /^admin\/videos\/([\w-]+)\/([\w-]+)$/, videoDelete],
 
   ["GET", /^surveys$/, listSurveys],
   ["GET", /^surveys\/([\w-]+)$/, getSurvey],
