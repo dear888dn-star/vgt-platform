@@ -1,13 +1,15 @@
 // O'quvchi progressi: mavzular, metodlar natijalari, o'quv rejasi va eslatmalar.
 // Tizimga kirgan foydalanuvchida server bilan sinxronlanadi, aks holda brauzerda saqlanadi.
 import { api, session } from "./api.js";
+import { computeGame, levelOf, streakOf } from "./gamification.js";
 
 const LOCAL_KEY = "vgt.progress.guest";
 let state = null;
 let loadedFor = null;
 let saveTimer = null;
 
-const empty = () => ({ topics: {}, plan: [], notes: {} });
+const empty = () => ({ topics: {}, plan: [], notes: {}, activity: {}, srs: {}, srsStats: { reviews: 0 } });
+const today = () => new Date().toISOString().slice(0, 10);
 
 function readLocal() {
   try {
@@ -36,13 +38,58 @@ export async function loadProgress() {
 window.addEventListener("vgt:auth", () => {
   state = null;
   loadedFor = null;
+  evidenceCache = null;
 });
+
+// ---------- XP va darajalar ----------
+// Serverdagi dalillar (trenajyor, marshrut, mustaqil ish, diagnostika) keshlanadi; mahalliy o'zgarishlar
+// (mavzu, takrorlash, seriya) darhol hisoblanadi va "+XP" animatsiyasi chiqadi.
+let evidenceCache = null;
+
+export async function loadGame({ fresh = false } = {}) {
+  await loadProgress();
+  if (session.user && (fresh || !evidenceCache)) {
+    try {
+      evidenceCache = await api.get("evidence");
+    } catch {
+      evidenceCache = null;
+    }
+  }
+  return computeGame({ ...(evidenceCache || {}), progress: state });
+}
+
+const localXp = () => {
+  const g = computeGame({ progress: state });
+  return g.bySource.topics + g.bySource.review + g.bySource.streak;
+};
+const otherXp = () => (evidenceCache ? computeGame({ ...evidenceCache, progress: {} }).xp - computeGame({ progress: {} }).xp : 0);
+
+function trackXp(fn) {
+  const before = localXp();
+  const firstToday = !state.activity?.[today()];
+  fn();
+  state.activity ||= {};
+  state.activity[today()] = (state.activity[today()] || 0) + 1;
+  const after = localXp();
+  const gain = after - before;
+  if (gain > 0) {
+    const other = otherXp();
+    const lvBefore = levelOf(other + before);
+    const lvAfter = levelOf(other + after);
+    window.dispatchEvent(new CustomEvent("vgt:xp", { detail: { gain, total: other + after, levelUp: lvAfter.index > lvBefore.index ? lvAfter : null } }));
+  }
+  if (firstToday) {
+    const streak = streakOf(state.activity);
+    if (streak >= 2) window.dispatchEvent(new CustomEvent("vgt:streak", { detail: { streak } }));
+  }
+}
 
 function persist() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     if (session.user) {
       try {
+        if (!navigator.onLine) return;
         await api.put("progress", state);
       } catch (e) {
         console.warn("Progress saqlanmadi:", e);
@@ -61,9 +108,22 @@ export function topicState(topicId) {
 }
 
 export function updateTopic(topicId, fn) {
-  fn(topicState(topicId));
+  trackXp(() => fn(topicState(topicId)));
   persist();
 }
+
+/** Kunlik takrorlash kartalari (Leitner tizimi). */
+export function updateSrs(fn) {
+  state.srs ||= {};
+  state.srsStats ||= { reviews: 0 };
+  trackXp(() => fn(state.srs, state.srsStats));
+  persist();
+}
+
+export const progressState = () => state;
+
+// Internet qaytganda oflayn paytdagi o'zgarishlarni serverga yuboramiz.
+window.addEventListener("online", () => state && session.user && persist());
 
 export function updatePlan(fn) {
   fn(state.plan);

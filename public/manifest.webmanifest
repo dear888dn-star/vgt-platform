@@ -1,0 +1,24 @@
+{
+  "name": "Safar akademiya — Turizmda raqamli texnologiyalar",
+  "short_name": "Safar akademiya",
+  "description": "Turizm va madaniy meros texnikumlari uchun interaktiv ta'lim platformasi va virtual gidlik trenajyori.",
+  "lang": "uz",
+  "start_url": "/#/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1719",
+  "theme_color": "#0e7c86",
+  "categories": ["education"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "Mavzular", "url": "/#/topics" },
+    { "name": "Kunlik takrorlash", "url": "/#/review" },
+    { "name": "Trenajyor", "url": "/#/trainer" }
+  ]
+}

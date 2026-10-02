@@ -212,6 +212,7 @@ function startSession(el, s, criteria, voiceOn = false) {
   // ---------- Ovozli rejim ----------
   const voice = voiceSupport.tts || voiceSupport.stt ? createVoice(s, { onState: drawVoice }) : null;
   let voiceMode = Boolean(voice && voiceOn);
+  let voiceUsed = false;
   let lastNotice = "";
   const orb = h("div", { class: "vo-orb", "aria-hidden": "true" }, h("i", { class: "r1" }), h("i", { class: "r2" }), h("i", { class: "r3" }), h("span", { class: "vo-face" }, s.icon));
   const vStatus = h("div", { class: "vo-status", role: "status" }, "Ovozli rejim yoqildi");
@@ -340,6 +341,7 @@ function startSession(el, s, criteria, voiceOn = false) {
     if (!text || busy || finished) return;
     let spoken = "";
     voice?.stop();
+    if (voiceMode) voiceUsed = true;
     busy = true;
     sendBtn.disabled = true;
     input.value = "";
@@ -430,7 +432,7 @@ function startSession(el, s, criteria, voiceOn = false) {
     const status = addMsg("event", "⏳ AI ekspert mashg'ulotni tahlil qilmoqda...");
     try {
       const msgs = history[history.length - 1]?.role === "user" ? history.slice(0, -1) : history;
-      const session = await api.post("trainer/evaluate", { scenarioId: s.id, messages: msgs, hintsUsed, durationSec: Math.round((Date.now() - started) / 1000) });
+      const session = await api.post("trainer/evaluate", { scenarioId: s.id, messages: msgs, hintsUsed, voice: voiceUsed, durationSec: Math.round((Date.now() - started) / 1000) });
       status.textContent = "✅ Baholash tayyor.";
       showResult(el, s, session, criteria);
     } catch (e) {

@@ -1,6 +1,7 @@
 import { h, mount, toast, progressBar } from "../ui.js";
 import { api, session } from "../api.js";
 import { slideViewer } from "../slides.js";
+import { tutorDrawer } from "../tutor.js";
 import { TOPICS, METHOD_INFO, COURSE, BOOK_INTRO, LITERATURE } from "../../data/topics.js";
 import { loadProgress, topicState, updateTopic, topicCompletion, setNote } from "../progress.js";
 import { renderMethod } from "../methods.js";
@@ -104,6 +105,7 @@ export async function renderTopic(el, id) {
   );
 
   const notesBtn = notesDrawer(topic);
+  const tutor = tutorDrawer(topic);
 
   mount(
     el,
@@ -133,12 +135,15 @@ export async function renderTopic(el, id) {
       prev ? h("a", { href: `#/topics/${prev.id}`, class: "pager-card" }, h("small", {}, "← Oldingi mavzu"), h("b", {}, `${prev.num}. ${prev.title}`)) : h("span"),
       next ? h("a", { href: `#/topics/${next.id}`, class: "pager-card next" }, h("small", {}, "Keyingi mavzu →"), h("b", {}, `${next.num}. ${next.title}`)) : h("span")
     ),
-    notesBtn
+    notesBtn,
+    tutor
   );
 
   // Eski ?tab= havolalari: tegishli bo'limga o'tish
-  const initial = new URLSearchParams(location.hash.split("?")[1] || "").get("tab");
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const initial = params.get("tab");
   if (initial && initial !== "theory") setTimeout(() => document.getElementById(`learn-${initial}`)?.scrollIntoView({ block: "start" }), 120);
+  if (params.has("sec")) setTimeout(() => document.getElementById(`sec-${params.get("sec")}`)?.scrollIntoView({ block: "start" }), 120);
 
   // Scrollspy va o'qish progressi
   const fill = el.querySelector(".reading-progress-fill");
@@ -169,6 +174,7 @@ export async function renderTopic(el, id) {
     window.removeEventListener("scroll", onScroll);
     spy.disconnect();
     notesBtn.remove();
+    tutor.destroy();
     viewer?.destroy?.();
   };
 }

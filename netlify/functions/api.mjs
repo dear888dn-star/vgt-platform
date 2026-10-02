@@ -15,6 +15,8 @@ import {
 import { aiEnabled, streamText, completeText, modelName, provider, voiceEnabled, synthesizeSpeech, transcribeAudio } from "../lib/ai.mjs";
 import { demoReply, demoEvaluation } from "../lib/demo.mjs";
 import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagnostics.mjs";
+import { computeGame, certificateStatus } from "../../public/js/gamification.js";
+import { findTopic, tutorSystem, searchAnswer } from "../lib/tutor.mjs";
 import { ROUTE_RUBRIC, ROUTE_LEVELS, routeLevel } from "../lib/route-task.mjs";
 
 const MAX_TURNS = 40;
@@ -130,6 +132,7 @@ async function updateMe(req) {
   if (b.name !== undefined) user.name = str(b.name, 120) || user.name;
   if (b.group !== undefined) user.group = str(b.group, 60);
   if (b.college !== undefined) user.college = str(b.college, 160);
+  if (b.hideFromRating !== undefined) user.hideFromRating = Boolean(b.hideFromRating);
   // O'quvchi guruhini faqat hali belgilanmagan bo'lsa o'zi tanlaydi; keyin uni o'qituvchi o'zgartiradi.
   if (user.role === "student" && (user.cohort || "unassigned") === "unassigned" && ["experimental", "control"].includes(b.cohort)) {
     user.cohort = b.cohort;
@@ -441,10 +444,28 @@ async function getProgress(req) {
 async function saveProgress(req) {
   const user = await requireUser(req);
   const b = await body(req);
+  const obj = (v) => (typeof v === "object" && v && !Array.isArray(v) ? v : {});
+  const activity = Object.fromEntries(
+    Object.entries(obj(b.activity))
+      .filter(([k, v]) => /^\d{4}-\d{2}-\d{2}$/.test(k) && Number.isFinite(v))
+      .sort(([a], [c]) => c.localeCompare(a))
+      .slice(0, 400)
+      .map(([k, v]) => [k, Math.max(0, Math.min(10000, Math.round(v)))])
+  );
+  const srs = Object.fromEntries(
+    Object.entries(obj(b.srs))
+      .slice(0, 3000)
+      .filter(([k, v]) => k.length <= 120 && Number.isInteger(v?.box) && typeof v?.due === "string")
+      .map(([k, v]) => [k, { box: Math.max(0, Math.min(5, v.box)), due: v.due.slice(0, 10) }])
+  );
+  const st = obj(b.srsStats);
   const progress = {
-    topics: typeof b.topics === "object" && b.topics ? b.topics : {},
+    topics: obj(b.topics),
     plan: Array.isArray(b.plan) ? b.plan.slice(0, 200) : [],
-    notes: typeof b.notes === "object" && b.notes ? b.notes : {},
+    notes: obj(b.notes),
+    activity,
+    srs,
+    srsStats: { reviews: Math.max(0, Math.min(100000, Number(st.reviews) || 0)), lastReview: str(st.lastReview, 10) },
     updatedAt: new Date().toISOString(),
   };
   if (JSON.stringify(progress).length > 200_000) throw new HttpError(413, "Ma'lumot hajmi juda katta");
@@ -644,6 +665,7 @@ async function trainerEvaluate(req) {
     opening: s.opening,
     hintsUsed: meta.hintsUsed,
     durationSec: Number(b.durationSec) || 0,
+    voice: b.voice === true,
     evaluation,
     total,
     model: modelName(),
@@ -917,17 +939,19 @@ async function gradeRoute(req, userId, id) {
 // ---------- Kompetensiya dalillari (kasb standarti xaritasi uchun) ----------
 
 async function evidenceFor(uid) {
-  const [progress, selfStudy, trainer, routesList] = await Promise.all([
+  const [progress, selfStudy, trainer, routesList, diag] = await Promise.all([
     db().get(`progress/${uid}`),
     getMany(`selfstudy/${uid}/`),
     getMany(`trainer/${uid}/`),
     getMany(`route/${uid}/`),
+    Promise.all(Object.keys(STAGES).map((st) => db().get(diagKey(st, uid)))),
   ]);
   return {
     progress: progress || { topics: {} },
     selfStudy: selfStudy.map((x) => ({ taskId: x.taskId, grade: x.resubmitted ? null : x.grade })),
-    trainer: trainer.map((x) => ({ scenarioId: x.scenarioId, total: x.total, createdAt: x.createdAt })),
+    trainer: trainer.map((x) => ({ scenarioId: x.scenarioId, total: x.total, createdAt: x.createdAt, voice: Boolean(x.voice) })),
     routes: routesList.filter((r) => r.grade).map((r) => ({ id: r.id, total: r.grade.total })),
+    diag: diag.filter(Boolean).map((d) => ({ stage: d.stage, sections: ["A", "B", "C", "D"].filter((k) => d[k]?.submittedAt).length })),
   };
 }
 
@@ -941,6 +965,100 @@ async function allEvidence(req) {
   const users = (await getMany("user/")).filter((u) => u.role === "student");
   const items = await Promise.all(users.map(async (u) => ({ user: publicUser(u), evidence: await evidenceFor(u.id) })));
   return json(items);
+}
+
+// ---------- AI Ustoz (mavzu bo'yicha yordamchi) ----------
+
+async function topicAsk(req, topicId) {
+  await requireUser(req);
+  const topic = findTopic(topicId);
+  if (!topic) throw new HttpError(404, "Mavzu topilmadi");
+  const b = await body(req);
+  let raw = Array.isArray(b.messages) ? b.messages.slice(-11) : [];
+  if (raw[0]?.role === "assistant") raw = raw.slice(1);
+  const history = cleanHistory(raw);
+  if (!history.length || history[history.length - 1].role !== "user") throw new HttpError(400, "Savol bo'sh");
+  if (!aiEnabled()) {
+    return new Response(searchAnswer(topic, history[history.length - 1].content), { headers: { "content-type": "text/plain; charset=utf-8" } });
+  }
+  const stream = streamText({ system: tutorSystem(topic), messages: history, maxTokens: 900, effort: "low" });
+  return new Response(stream, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+}
+
+// ---------- Reyting va sertifikat ----------
+
+const shortName = (name) => {
+  const [first, ...rest] = String(name || "").trim().split(/\s+/);
+  return rest.length ? `${first} ${rest[0][0]}.` : first || "O'quvchi";
+};
+let ratingCache = { at: 0, rows: null };
+
+async function ratingRows() {
+  if (ratingCache.rows && Date.now() - ratingCache.at < 5 * 60_000) return ratingCache.rows;
+  const users = (await getMany("user/")).filter((u) => u.role === "student");
+  const rows = await Promise.all(
+    users.map(async (u) => {
+      const game = computeGame(await evidenceFor(u.id));
+      return { id: u.id, name: shortName(u.name), group: u.group || "", college: u.college || "", collegeKey: normCollege(u.college), hidden: Boolean(u.hideFromRating), xp: game.xp, level: game.level.name, icon: game.level.icon, streak: game.stats.streak, badges: game.badges.filter((b) => b.earned).length };
+    })
+  );
+  ratingCache = { at: Date.now(), rows };
+  return rows;
+}
+
+async function leaderboard(req) {
+  const user = await requireUser(req);
+  const rows = await ratingRows();
+  const pick = (filter) => {
+    const list = rows.filter(filter).sort((a, b) => b.xp - a.xp);
+    const meIdx = list.findIndex((r) => r.id === user.id);
+    const view = list.map((r, i) => ({ rank: i + 1, me: r.id === user.id, name: r.hidden && r.id !== user.id ? "Yashirin ishtirokchi" : r.name, group: r.group, xp: r.xp, level: r.level, icon: r.icon, streak: r.streak, badges: r.badges }));
+    return { total: list.length, top: view.slice(0, 20), me: meIdx >= 20 ? view[meIdx] : null };
+  };
+  const mine = rows.find((r) => r.id === user.id);
+  return json({
+    group: user.group ? pick((r) => r.group && r.group.toLowerCase() === String(user.group).toLowerCase() && r.collegeKey === normCollege(user.college)) : null,
+    college: pick((r) => r.collegeKey === normCollege(user.college)),
+    all: pick(() => true),
+    myGroup: user.group || "",
+    myCollege: user.college || "",
+    hidden: Boolean(mine?.hidden),
+  });
+}
+
+async function issueCertificate(req) {
+  const user = await requireUser(req);
+  if (user.role !== "student") throw new HttpError(403, "Sertifikat faqat o'quvchilarga beriladi");
+  const existing = await db().get(`certuser/${user.id}`);
+  if (existing) return json(await db().get(`cert/${existing.code}`));
+  const game = computeGame(await evidenceFor(user.id));
+  const status = certificateStatus(game);
+  if (!status.eligible) throw new HttpError(400, "Sertifikat shartlari hali bajarilmagan");
+  const code = `SA-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+  const cert = {
+    code,
+    name: user.name,
+    college: user.college || "",
+    group: user.group || "",
+    course: "Turizmda raqamli texnologiyalar",
+    issuedAt: new Date().toISOString(),
+    stats: { xp: game.xp, level: game.level.name, levelIcon: game.level.icon, topicsDone: game.stats.topicsDone, bestTrainer: game.stats.bestTrainer, scenarios: game.stats.scenariosTried, bestRoute: game.stats.bestRoute, badges: game.badges.filter((b) => b.earned).length },
+  };
+  await db().set(`cert/${code}`, cert);
+  await db().set(`certuser/${user.id}`, { code });
+  return json(cert, 201);
+}
+
+async function getCertificate(req, code) {
+  const cert = await db().get(`cert/${String(code).toUpperCase()}`);
+  if (!cert) throw new HttpError(404, "Bunday sertifikat topilmadi");
+  return json(cert);
+}
+
+async function myCertificate(req) {
+  const user = await requireUser(req);
+  const ref = await db().get(`certuser/${user.id}`);
+  return json(ref ? await db().get(`cert/${ref.code}`) : null);
 }
 
 // ---------- Sozlamalar va diagnostika ----------
@@ -1248,6 +1366,11 @@ const routes = [
   ["PUT", /^admin\/routes\/([\w-]+)\/([\w-]+)\/grade$/, gradeRoute],
 
   ["GET", /^evidence$/, myEvidence],
+  ["GET", /^leaderboard$/, leaderboard],
+  ["POST", /^topics\/([\w-]+)\/ask$/, topicAsk],
+  ["GET", /^certificate$/, myCertificate],
+  ["POST", /^certificate$/, issueCertificate],
+  ["GET", /^certificate\/(SA-[0-9A-Fa-f]{8})$/, getCertificate],
   ["GET", /^admin\/evidence$/, allEvidence],
   ["GET", /^admin\/overview$/, overview],
   ["GET", /^admin\/surveys$/, adminSurveys],

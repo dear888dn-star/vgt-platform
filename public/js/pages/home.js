@@ -1,11 +1,14 @@
 import { h, mount } from "../ui.js";
 import { session } from "../api.js";
 import { COURSE, TOPICS } from "../../data/topics.js";
-import { loadProgress, topicCompletion } from "../progress.js";
+import { loadProgress, topicCompletion, loadGame } from "../progress.js";
+import { dueCount } from "./review.js";
 
 export async function render(el) {
   const user = session.user;
   await loadProgress();
+  const game = user?.role === "student" ? await loadGame() : null;
+  const due = user?.role === "student" ? dueCount() : 0;
   const done = TOPICS.filter((t) => topicCompletion(t) === 100).length;
   const tests = TOPICS.reduce((s, t) => s + t.quiz.length, 0);
   const questions = TOPICS.reduce((s, t) => s + t.questions.length, 0);
@@ -62,8 +65,11 @@ export async function render(el) {
         "div",
         { class: "card hero-card accent" },
         h("div", { class: "row between wrap" },
-          h("div", {}, h("div", { class: "eyebrow" }, "Shaxsiy kabinet"), h("h3", {}, `Xush kelibsiz, ${user.name.split(" ")[0]}!`), h("p", { class: "muted small" }, `${done} / ${TOPICS.length} mavzu to'liq o'zlashtirildi`)),
+          h("div", { class: "row home-me" },
+            game && h("a", { href: "#/passport", class: "home-level", title: "Safar pasporti", style: { "--p": game.level.pct } }, h("span", {}, game.level.icon)),
+            h("div", {}, h("div", { class: "eyebrow" }, "Shaxsiy kabinet"), h("h3", {}, `Xush kelibsiz, ${user.name.split(" ")[0]}!`), h("p", { class: "muted small" }, game ? `${game.level.name} · ${game.xp} XP · 🔥 ${game.stats.streak} kunlik seriya · ${done}/${TOPICS.length} mavzu` : `${done} / ${TOPICS.length} mavzu to'liq o'zlashtirildi`))),
           h("div", { class: "row wrap" },
+            game && h("a", { href: "#/review", class: `btn ${due ? "" : "ghost"}` }, `🔁 Takrorlash${due ? ` (${due})` : ""}`),
             h("a", { href: user.role === "teacher" ? "#/teacher" : "#/self-study", class: "btn" }, user.role === "teacher" ? "O'qituvchi paneli" : "O'quv rejam"),
             user.role === "student" && h("a", { href: "#/standard", class: "btn ghost" }, "🎯 Kompetensiya xaritam")))
       ),

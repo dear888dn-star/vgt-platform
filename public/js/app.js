@@ -3,6 +3,8 @@ import { h, mount, errorBox } from "./ui.js";
 import { session } from "./api.js";
 import { watch, transition, initTopbar } from "./motion.js";
 import { initResultsBoard } from "./results-board.js";
+import { initCelebrations } from "./celebrate.js";
+import { initTools } from "./search.js";
 import * as home from "./pages/home.js";
 import * as auth from "./pages/auth.js";
 import * as topics from "./pages/topics.js";
@@ -14,6 +16,9 @@ import * as profile from "./pages/profile.js";
 import * as diagnostics from "./pages/diagnostics.js";
 import * as routeLab from "./pages/route-lab.js";
 import * as standard from "./pages/standard.js";
+import * as passport from "./pages/passport.js";
+import * as review from "./pages/review.js";
+import * as cert from "./pages/cert.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -32,6 +37,9 @@ const routes = [
   [/^\/surveys\/([\w-]+)$/, surveys.renderSurvey, { auth: true }],
   [/^\/teacher(?:\/([\w-]+))?(?:\/([\w-]+))?$/, teacher.render, { teacher: true }],
   [/^\/profile$/, profile.render, { auth: true }],
+  [/^\/passport$/, passport.render, { auth: true }],
+  [/^\/review$/, review.render],
+  [/^\/cert\/([\w-]+)$/, cert.render],
 ];
 
 const NAV = [
@@ -53,6 +61,7 @@ function renderNav() {
   const user = session.user;
   const items = [...NAV];
   if (user?.role === "teacher") items.push(["#/teacher", "Panel", "📊"]);
+  else if (user) items.push(["#/passport", "Pasport", "🛂"]);
   const active = (href) => (href === "#/" ? path === "#/" || path === "" : path.startsWith(href));
   mount(
     nav,
@@ -110,6 +119,31 @@ window.addEventListener("vgt:auth", renderNav);
 document.getElementById("year").textContent = new Date().getFullYear();
 main.setAttribute("tabindex", "-1");
 initTopbar();
+initTools();
+initCelebrations();
 initResultsBoard();
 watch(main);
 route();
+
+// ---------- Ilova (PWA): o'rnatish va internetsiz rejim ----------
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
+const offlineBar = h("div", { class: "offline-bar", role: "status" }, "📴 Internet aloqasi yo'q — oldin ochilgan mavzular va taqdimotlar oflayn ishlaydi. Natijalar aloqa tiklangach saqlanadi.");
+const syncOnline = () => (navigator.onLine ? offlineBar.remove() : document.body.append(offlineBar));
+window.addEventListener("online", syncOnline);
+window.addEventListener("offline", syncOnline);
+syncOnline();
+let installEvent = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installEvent = e;
+  if (document.querySelector(".install-btn")) return;
+  const btn = h("button", { class: "icon-btn tool-btn install-btn", title: "Ilovani o'rnatish", "aria-label": "Ilovani o'rnatish", onclick: async () => {
+    installEvent?.prompt();
+    await installEvent?.userChoice;
+    installEvent = null;
+    btn.remove();
+  } }, "📲");
+  document.querySelector(".topbar-tools")?.prepend(btn);
+});

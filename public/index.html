@@ -5,12 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Safar akademiya</title>
     <meta name="description" content="Turizmda raqamli texnologiyalar fani bo'yicha interaktiv ta'lim platformasi va sun'iy intellekt asosidagi virtual gidlik trenajyori." />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e7c86" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      try {
+        var t = localStorage.getItem("vgt.theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="/css/style.css" />
     <link rel="stylesheet" href="/css/motion.css" />
+    <link rel="stylesheet" href="/css/features.css" />
   </head>
   <body>
     <a class="skip" href="#main">Asosiy mazmunga o'tish</a>
@@ -20,8 +30,9 @@
           <span class="brand-mark">🧭</span>
           <span class="brand-text"><strong>Safar</strong><small>akademiya</small></span>
         </a>
-        <button class="menu-toggle icon-btn" aria-label="Menyu" aria-expanded="false">☰</button>
         <nav class="nav" id="nav"></nav>
+        <div class="topbar-tools"></div>
+        <button class="menu-toggle icon-btn" aria-label="Menyu" aria-expanded="false">☰</button>
       </div>
     </header>
     <main id="main" class="container"></main>

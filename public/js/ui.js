@@ -101,3 +101,10 @@ export function progressBar(value, max = 100, label) {
   const pct = max ? Math.round((value / max) * 100) : 0;
   return h("div", { class: "progress", title: label || `${pct}%` }, h("div", { class: "progress-fill", style: { width: `${Math.min(100, pct)}%` } }));
 }
+
+const UZ_MONTHS = ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr"];
+/** "2-oktabr, 2026-yil" (brauzerlar o'zbekcha oy nomlarini har xil chiqaradi). */
+export function fmtLongDate(d, { year = true } = {}) {
+  const x = new Date(d);
+  return `${x.getDate()}-${UZ_MONTHS[x.getMonth()]}${year ? `, ${x.getFullYear()}-yil` : ""}`;
+}
