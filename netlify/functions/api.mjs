@@ -961,10 +961,24 @@ const ttsUrl = (k) => `/api/tts/audio/${k}.mp3`;
 
 async function ttsSpeak(req) {
   const b = await body(req);
-  const text = str(b.text, 1800).replace(/\s+/g, " ").trim();
-  if (!text) throw new HttpError(400, "Matn bo'sh");
-  const voice = VOICES.some((v) => v.id === b.voice) ? b.voice : "Kore";
   const style = STYLES[b.style] ? b.style : "narrator";
+  let text = "";
+  let dialogue = null;
+  let voice = VOICES.some((v) => v.id === b.voice) ? b.voice : "Kore";
+  if (Array.isArray(b.dialogue) && b.dialogue.length) {
+    // Suhbat: bir nechta personaj — bitta so'rovda (limitni tejash uchun).
+    dialogue = b.dialogue
+      .slice(0, 12)
+      .map((x) => ({ speaker: str(x?.speaker, 40) || "Turist", gender: x?.gender === "male" ? "male" : "female", text: str(x?.text, 1500).replace(/\s+/g, " ").trim() }))
+      .filter((x) => x.text);
+    if (!dialogue.length) throw new HttpError(400, "Matn bo'sh");
+    if (dialogue.reduce((n, x) => n + x.text.length, 0) > 2400) throw new HttpError(400, "Matn juda uzun");
+    text = JSON.stringify(dialogue.map((x) => [x.speaker, x.gender, x.text]));
+    voice = "dialogue";
+  } else {
+    text = str(b.text, 1800).replace(/\s+/g, " ").trim();
+    if (!text) throw new HttpError(400, "Matn bo'sh");
+  }
   const key = ttsKey(text, voice, style);
   const meta = await db().get(ttsMetaKey(key));
   if (meta) return json({ url: ttsUrl(key), cached: true, seconds: meta.seconds });
@@ -976,13 +990,15 @@ async function ttsSpeak(req) {
   const used = (await db().get(qKey))?.n || 0;
   if (used >= (TTS_DAILY[user.role] || 300)) throw new HttpError(429, "Bugungi AI ovozi limiti tugadi. Ertaga qayta urinib ko'ring.");
   try {
-    const out = await synthesize(text, { voice, style });
+    const out = await synthesize(text, { voice, style, dialogue });
     await db().setBinary(ttsBinKey(key), out.audio);
     await db().set(ttsMetaKey(key), { seconds: Math.round(out.seconds * 10) / 10, model: out.model, voice, style, chars: text.length, bytes: out.audio.length, createdAt: new Date().toISOString() });
     await db().set(qKey, { n: used + 1 });
     return json({ url: ttsUrl(key), cached: false, seconds: out.seconds });
   } catch (err) {
-    throw new HttpError(err.status === 429 ? 429 : err.status === 503 ? 503 : 502, err.message || "AI ovozini yaratib bo'lmadi");
+    const status = err.status === 429 ? 429 : err.status === 503 ? 503 : 502;
+    await db().set("meta/tts-last-error", { at: new Date().toISOString(), status, message: err.message, detail: err.detail || "", quotaId: err.quotaId || "", daily: Boolean(err.daily), model: err.model || "" }).catch(() => {});
+    return json({ error: err.message || "AI ovozini yaratib bo'lmadi", retryAfter: err.retryAfter ?? null, daily: Boolean(err.daily) }, status);
   }
 }
 
@@ -1019,6 +1035,7 @@ async function adminTts(req) {
     models,
     voices: VOICES,
     defaultVoice: (await ttsSettings()).voice,
+    lastError: await db().get("meta/tts-last-error"),
     cached: metas.length,
     seconds: Math.round(metas.reduce((n, m) => n + (m.seconds || 0), 0)),
     bytes: metas.reduce((n, m) => n + (m.bytes || 0), 0),

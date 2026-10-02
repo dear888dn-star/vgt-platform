@@ -76,7 +76,7 @@ async function claudeComplete(opts) {
 
 // ---------------- Gemini ----------------
 
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_URL = `${process.env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com/v1beta"}/models`;
 const RETRYABLE = new Set([404, 429, 500, 503]);
 
 function geminiBody({ system, messages, maxTokens, format }) {

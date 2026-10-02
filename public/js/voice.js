@@ -170,34 +170,20 @@ export function createVoice(scenario, { onState, engine, persist = true } = {}) 
     });
   }
 
-  // AI ovozi (Gemini TTS): har bir personaj o'z ovozi bilan, keyingi gaplar oldindan tayyorlanadi.
-  const POOL = { female: ["Kore", "Aoede", "Leda", "Sulafat"], male: ["Charon", "Puck", "Orus", "Iapetus"] };
-  const speakerVoice = new Map();
-  const voiceFor = (seg) => {
-    if (!speakerVoice.has(seg.speaker)) {
-      const used = [...speakerVoice.values()].filter((v) => POOL[seg.gender].includes(v)).length;
-      speakerVoice.set(seg.speaker, POOL[seg.gender][used % POOL[seg.gender].length]);
-    }
-    return speakerVoice.get(seg.speaker);
-  };
+  // AI ovozi (Gemini TTS): butun javob BITTA so'rovda (ko'p so'zlovchili ovoz — har bir personaj jinsiga qarab
+  // o'z ovozida). Avval har bir gap alohida so'ralar edi va bepul tarifning daqiqalik limiti darhol tugardi.
   let narr = null;
   async function aiSpeak(segments) {
     const style = scenario.language === "ingliz" ? "english" : "tourist";
-    narr ||= createNarrator({ onLevel: (level) => onState?.({ ...state, level }), onNotice: (notice) => onState?.({ ...state, notice }) });
-    const opts = segments.map((seg) => ({ voice: voiceFor(seg), style }));
-    segments.slice(1).forEach((seg, i) => narr.prefetch(seg.text, opts[i + 1]));
-    let stopped = false;
-    cancelSpeak = () => {
-      stopped = true;
-      narr.stop();
-    };
-    for (let i = 0; i < segments.length; i++) {
-      if (stopped) return;
-      set({ speaker: segments[i].speaker });
-      const r = await narr.speak(segments[i].text, opts[i]);
-      if (r === "none") throw new Error("AI ovozi ishlamadi");
-      if (r === "stopped") return;
-    }
+    narr ||= createNarrator({
+      onLevel: (level) => onState?.({ ...state, level }),
+      onNotice: (notice) => onState?.({ ...state, notice }),
+      onWait: (waiting) => onState?.({ ...state, waiting }),
+    });
+    cancelSpeak = () => narr.stop();
+    set({ speaker: [...new Set(segments.map((x) => x.speaker))].join(", ") });
+    const r = await narr.speak(null, { dialogue: segments.map(({ speaker, gender, text }) => ({ speaker, gender, text })), style });
+    if (r === "none") throw new Error("AI ovozi ishlamadi");
   }
 
   /** Personaj javobini ovoz chiqarib o'qiydi. Tugaganda resolve bo'ladi. */
@@ -213,7 +199,9 @@ export function createVoice(scenario, { onState, engine, persist = true } = {}) 
           await aiSpeak(segments);
           return;
         } catch {
-          // narrator xabarni o'zi ko'rsatadi; brauzer ovoziga o'tamiz
+          // Narrator sababni o'zi ko'rsatadi. Brauzer ovoziga faqat u shu tilda haqiqiy ovozga ega bo'lsa o'tamiz
+          // (Chrome o'zbekcha gapira olmaydi — buzuq talaffuzdan ko'ra matnni o'qish yaxshiroq).
+          if (voicePlan?.mode !== "native") return;
         }
       }
       await browserSpeak(segments);

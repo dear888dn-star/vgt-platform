@@ -259,7 +259,8 @@ function startSession(el, s, criteria, voiceOn = false) {
     micBtn.classList.toggle("rec", Boolean(st.listening));
     micBtn.style.setProperty("--lvl", (st.level || 0).toFixed(3));
     micBig.classList.toggle("rec", Boolean(st.listening));
-    if (st.speaking) vStatus.textContent = `🔊 ${st.speaker || "Turist"} gapirmoqda… (to'xtatib gapirish uchun mikrofonni bosing)`;
+    if (st.speaking && st.waiting) vStatus.textContent = `⏳ AI ovozi navbatda (Gemini limiti) — ${st.waiting} s…`;
+    else if (st.speaking) vStatus.textContent = `🔊 ${st.speaker || "Turist"} gapirmoqda… (to'xtatib gapirish uchun mikrofonni bosing)`;
     else if (st.listening) vStatus.textContent = "🎧 Sizni tinglayapman… gapiring";
     else if (busy) vStatus.textContent = "💭 Javob tayyorlanmoqda…";
     else if (!finished) vStatus.textContent = "Gapirish uchun mikrofon tugmasini bosing";
