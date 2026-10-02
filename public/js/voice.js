@@ -2,7 +2,8 @@
 // 1) Brauzer ovozi (Web Speech API) — bepul va tez. O'zbekcha ovoz bo'lmasa, turkcha ovoz moslashtirilgan matn bilan o'qiydi.
 // 2) AI ovozi (Gemini TTS, serverda GEMINI_API_KEY bo'lsa) — tabiiyroq; limit tugasa, brauzer ovoziga qaytadi.
 // Nutqni tanish: brauzerning SpeechRecognition'i, u bo'lmasa — yozib olish va server orqali tanish.
-import { api, session } from "./api.js";
+import { api } from "./api.js";
+import { createNarrator } from "./narrator.js";
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const synth = window.speechSynthesis;
@@ -88,11 +89,9 @@ export function createVoice(scenario, { onState, engine, persist = true } = {}) 
   const state = { engine: engine || prefs.engine || "auto", rate: prefs.rate || 1, autoListen: prefs.autoListen ?? true, speaking: false, listening: false };
   let voices = [];
   let voicePlan = null;
-  let audio;
   let audioCtx;
   let cancelSpeak = () => {};
   let stopListen = () => {};
-  let aiFailed = false;
   const set = (patch) => {
     Object.assign(state, patch);
     onState?.(state);
@@ -125,7 +124,8 @@ export function createVoice(scenario, { onState, engine, persist = true } = {}) 
     return voicePlan;
   }
 
-  const useAI = () => !aiFailed && session.user && (state.engine === "ai" || (state.engine === "auto" && voicePlan && voicePlan.mode !== "native" && scenario.voiceAI));
+  // Brauzerlar o'zbekcha gapira olmaydi, shuning uchun AI ovozi (bo'lsa) doim birinchi.
+  const useAI = () => state.engine !== "browser" && scenario.voiceAI;
 
   function browserSpeak(segments) {
     return new Promise((resolve) => {
@@ -170,58 +170,34 @@ export function createVoice(scenario, { onState, engine, persist = true } = {}) 
     });
   }
 
-  async function aiSpeak(segments) {
-    const r = await fetch("/api/trainer/tts", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${session.token}` },
-      body: JSON.stringify({ scenarioId: scenario.id, segments }),
-    });
-    if (!r.ok) {
-      let msg = "AI ovozi ishlamadi";
-      try {
-        msg = (await r.json()).error || msg;
-      } catch {}
-      throw new Error(msg);
+  // AI ovozi (Gemini TTS): har bir personaj o'z ovozi bilan, keyingi gaplar oldindan tayyorlanadi.
+  const POOL = { female: ["Kore", "Aoede", "Leda", "Sulafat"], male: ["Charon", "Puck", "Orus", "Iapetus"] };
+  const speakerVoice = new Map();
+  const voiceFor = (seg) => {
+    if (!speakerVoice.has(seg.speaker)) {
+      const used = [...speakerVoice.values()].filter((v) => POOL[seg.gender].includes(v)).length;
+      speakerVoice.set(seg.speaker, POOL[seg.gender][used % POOL[seg.gender].length]);
     }
-    const url = URL.createObjectURL(await r.blob());
-    audio ||= new Audio();
-    audio.src = url;
-    audio.playbackRate = state.rate;
-    try {
-      audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
-      if (!audio._analyser) {
-        const src = audioCtx.createMediaElementSource(audio);
-        const an = audioCtx.createAnalyser();
-        an.fftSize = 256;
-        src.connect(an).connect(audioCtx.destination);
-        audio._analyser = an;
-      }
-      audioCtx.resume();
-    } catch {}
-    return new Promise((resolve) => {
-      let raf;
-      const data = new Uint8Array(128);
-      const loop = () => {
-        if (audio._analyser) {
-          audio._analyser.getByteFrequencyData(data);
-          const lvl = data.reduce((s, x) => s + x, 0) / data.length / 255;
-          onState?.({ ...state, level: Math.min(1, lvl * 2.2) });
-        }
-        raf = requestAnimationFrame(loop);
-      };
-      const done = () => {
-        cancelAnimationFrame(raf);
-        URL.revokeObjectURL(url);
-        resolve();
-      };
-      audio.onended = done;
-      audio.onerror = done;
-      cancelSpeak = () => {
-        audio.pause();
-        done();
-      };
-      audio.play().then(loop, done);
-    });
+    return speakerVoice.get(seg.speaker);
+  };
+  let narr = null;
+  async function aiSpeak(segments) {
+    const style = scenario.language === "ingliz" ? "english" : "tourist";
+    narr ||= createNarrator({ onLevel: (level) => onState?.({ ...state, level }), onNotice: (notice) => onState?.({ ...state, notice }) });
+    const opts = segments.map((seg) => ({ voice: voiceFor(seg), style }));
+    segments.slice(1).forEach((seg, i) => narr.prefetch(seg.text, opts[i + 1]));
+    let stopped = false;
+    cancelSpeak = () => {
+      stopped = true;
+      narr.stop();
+    };
+    for (let i = 0; i < segments.length; i++) {
+      if (stopped) return;
+      set({ speaker: segments[i].speaker });
+      const r = await narr.speak(segments[i].text, opts[i]);
+      if (r === "none") throw new Error("AI ovozi ishlamadi");
+      if (r === "stopped") return;
+    }
   }
 
   /** Personaj javobini ovoz chiqarib o'qiydi. Tugaganda resolve bo'ladi. */
@@ -236,9 +212,8 @@ export function createVoice(scenario, { onState, engine, persist = true } = {}) 
         try {
           await aiSpeak(segments);
           return;
-        } catch (err) {
-          aiFailed = true;
-          onState?.({ ...state, notice: `${err.message}. Brauzer ovozi ishlatiladi.` });
+        } catch {
+          // narrator xabarni o'zi ko'rsatadi; brauzer ovoziga o'tamiz
         }
       }
       await browserSpeak(segments);
@@ -393,7 +368,6 @@ export function createVoice(scenario, { onState, engine, persist = true } = {}) 
     },
     setEngine(e) {
       state.engine = e;
-      aiFailed = false;
       savePrefs();
     },
     setRate(r) {

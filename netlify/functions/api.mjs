@@ -12,11 +12,12 @@ import {
   hintPrompt,
   EVALUATION_SCHEMA,
 } from "../lib/scenarios.mjs";
-import { aiEnabled, streamText, completeText, modelName, provider, voiceEnabled, synthesizeSpeech, transcribeAudio } from "../lib/ai.mjs";
+import { aiEnabled, streamText, completeText, modelName, provider, voiceEnabled, transcribeAudio } from "../lib/ai.mjs";
 import { demoReply, demoEvaluation } from "../lib/demo.mjs";
 import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagnostics.mjs";
 import { computeGame, certificateStatus } from "../../public/js/gamification.js";
 import { findTopic, tutorSystem, searchAnswer } from "../lib/tutor.mjs";
+import { synthesize, ttsEnabled, ttsModels, ttsKey, VOICES, STYLES } from "../lib/tts.mjs";
 import { ROUTE_RUBRIC, ROUTE_LEVELS, routeLevel } from "../lib/route-task.mjs";
 
 const MAX_TURNS = 40;
@@ -556,25 +557,6 @@ function transcriptOf(s, history) {
 
 // ---------- Ovozli rejim ----------
 
-async function trainerTts(req) {
-  await requireUser(req);
-  if (!voiceEnabled()) throw new HttpError(503, "AI ovozi sozlanmagan (GEMINI_API_KEY)");
-  const b = await body(req);
-  const s = findScenario(b.scenarioId);
-  const segments = (Array.isArray(b.segments) ? b.segments : [])
-    .slice(0, 8)
-    .map((x) => ({ speaker: str(x?.speaker, 40) || "Turist", gender: x?.gender === "male" ? "male" : "female", text: str(x?.text, 1200) }))
-    .filter((x) => x.text);
-  if (!segments.length) throw new HttpError(400, "Matn bo'sh");
-  if (segments.reduce((n, x) => n + x.text.length, 0) > 2400) throw new HttpError(400, "Matn juda uzun");
-  try {
-    const wav = await synthesizeSpeech(segments, { language: s.language });
-    return new Response(wav, { headers: { "content-type": "audio/wav", "cache-control": "no-store" } });
-  } catch (err) {
-    throw new HttpError(err.status === 429 ? 429 : 502, err.status === 429 ? "AI ovozi uchun kunlik bepul limit tugadi — brauzer ovozi ishlatiladi" : "AI ovozini yaratib bo'lmadi");
-  }
-}
-
 async function trainerTranscribe(req) {
   await requireUser(req);
   if (!voiceEnabled()) throw new HttpError(503, "Nutqni tanish sozlanmagan (GEMINI_API_KEY)");
@@ -939,12 +921,13 @@ async function gradeRoute(req, userId, id) {
 // ---------- Kompetensiya dalillari (kasb standarti xaritasi uchun) ----------
 
 async function evidenceFor(uid) {
-  const [progress, selfStudy, trainer, routesList, diag] = await Promise.all([
+  const [progress, selfStudy, trainer, routesList, diag, studio] = await Promise.all([
     db().get(`progress/${uid}`),
     getMany(`selfstudy/${uid}/`),
     getMany(`trainer/${uid}/`),
     getMany(`route/${uid}/`),
     Promise.all(Object.keys(STAGES).map((st) => db().get(diagKey(st, uid)))),
+    getMany(`mytour/${uid}/`),
   ]);
   return {
     progress: progress || { topics: {} },
@@ -952,6 +935,7 @@ async function evidenceFor(uid) {
     trainer: trainer.map((x) => ({ scenarioId: x.scenarioId, total: x.total, createdAt: x.createdAt, voice: Boolean(x.voice) })),
     routes: routesList.filter((r) => r.grade).map((r) => ({ id: r.id, total: r.grade.total })),
     diag: diag.filter(Boolean).map((d) => ({ stage: d.stage, sections: ["A", "B", "C", "D"].filter((k) => d[k]?.submittedAt).length })),
+    studio: studio.map((t) => ({ stops: t.stops.filter((x) => x.narration?.trim()).length, published: Boolean(t.published), reviewed: Boolean(t.review) })),
   };
 }
 
@@ -965,6 +949,189 @@ async function allEvidence(req) {
   const users = (await getMany("user/")).filter((u) => u.role === "student");
   const items = await Promise.all(users.map(async (u) => ({ user: publicUser(u), evidence: await evidenceFor(u.id) })));
   return json(items);
+}
+
+// ---------- AI ovozi (Gemini TTS) ----------
+// Har bir (matn, ovoz, uslub) bir marta yaratiladi va MP3 sifatida keshlanadi; keyin hamma uchun keshdan beriladi.
+
+const TTS_DAILY = { student: 300, teacher: 3000 };
+const ttsMetaKey = (k) => `ttsmeta/${k}`;
+const ttsBinKey = (k) => `ttsbin/${k}`;
+const ttsUrl = (k) => `/api/tts/audio/${k}.mp3`;
+
+async function ttsSpeak(req) {
+  const b = await body(req);
+  const text = str(b.text, 1800).replace(/\s+/g, " ").trim();
+  if (!text) throw new HttpError(400, "Matn bo'sh");
+  const voice = VOICES.some((v) => v.id === b.voice) ? b.voice : "Kore";
+  const style = STYLES[b.style] ? b.style : "narrator";
+  const key = ttsKey(text, voice, style);
+  const meta = await db().get(ttsMetaKey(key));
+  if (meta) return json({ url: ttsUrl(key), cached: true, seconds: meta.seconds });
+  if (!ttsEnabled()) throw new HttpError(503, "AI ovozi sozlanmagan (GEMINI_API_KEY)");
+  // Yangi ovoz yaratish faqat tizimga kirganlar uchun (bepul limitni himoya qilish).
+  const user = await requireUser(req);
+  const day = new Date().toISOString().slice(0, 10);
+  const qKey = `ttsq/${day}/${user.id}`;
+  const used = (await db().get(qKey))?.n || 0;
+  if (used >= (TTS_DAILY[user.role] || 300)) throw new HttpError(429, "Bugungi AI ovozi limiti tugadi. Ertaga qayta urinib ko'ring.");
+  try {
+    const out = await synthesize(text, { voice, style });
+    await db().setBinary(ttsBinKey(key), out.audio);
+    await db().set(ttsMetaKey(key), { seconds: Math.round(out.seconds * 10) / 10, model: out.model, voice, style, chars: text.length, bytes: out.audio.length, createdAt: new Date().toISOString() });
+    await db().set(qKey, { n: used + 1 });
+    return json({ url: ttsUrl(key), cached: false, seconds: out.seconds });
+  } catch (err) {
+    throw new HttpError(err.status === 429 ? 429 : err.status === 503 ? 503 : 502, err.message || "AI ovozini yaratib bo'lmadi");
+  }
+}
+
+async function ttsAudio(req, key) {
+  const data = await db().getBinary(ttsBinKey(key));
+  if (!data) throw new HttpError(404, "Audio topilmadi");
+  return new Response(data, { headers: { "content-type": "audio/mpeg", "cache-control": "public, max-age=31536000, immutable" } });
+}
+
+async function ttsSettings() {
+  return (await db().get("meta/tts-settings")) || { voice: "Kore" };
+}
+
+async function ttsInfo() {
+  const st = await ttsSettings();
+  return json({ enabled: ttsEnabled(), voices: VOICES, defaultVoice: st.voice });
+}
+
+async function setTtsSettings(req) {
+  await requireTeacher(req);
+  const b = await body(req);
+  if (!VOICES.some((v) => v.id === b.voice)) throw new HttpError(400, "Ovoz noto'g'ri");
+  await db().set("meta/tts-settings", { voice: b.voice, updatedAt: new Date().toISOString() });
+  return json({ voice: b.voice });
+}
+
+async function adminTts(req) {
+  await requireTeacher(req);
+  const metas = await getMany("ttsmeta/");
+  let models = [];
+  if (ttsEnabled()) models = await ttsModels();
+  return json({
+    enabled: ttsEnabled(),
+    models,
+    voices: VOICES,
+    defaultVoice: (await ttsSettings()).voice,
+    cached: metas.length,
+    seconds: Math.round(metas.reduce((n, m) => n + (m.seconds || 0), 0)),
+    bytes: metas.reduce((n, m) => n + (m.bytes || 0), 0),
+  });
+}
+
+// ---------- Ekskursiya studiyasi (o'quvchi yaratgan virtual ekskursiyalar) ----------
+
+const LANDMARK_KEYS = new Set(["registan", "khiva", "bukhara", "shahizinda", "aksaray", "guramir", "tashkent"]);
+const TIMES = new Set(["day", "sunset", "night"]);
+const studioKey = (uid, id) => `mytour/${uid}/${id}`;
+
+function cleanStudio(b, prev = {}) {
+  const stops = (Array.isArray(b.stops) ? b.stops : prev.stops || []).slice(0, 12).map((x) => ({
+    landmark: LANDMARK_KEYS.has(x?.landmark) ? x.landmark : "registan",
+    time: TIMES.has(x?.time) ? x.time : "day",
+    city: str(x?.city, 60),
+    title: str(x?.title, 120),
+    narration: str(x?.narration, 1500),
+    facts: (Array.isArray(x?.facts) ? x.facts : []).map((f) => str(f, 140)).filter(Boolean).slice(0, 6),
+  }));
+  return { title: str(b.title ?? prev.title, 140) || "Mening ekskursiyam", description: str(b.description ?? prev.description, 600), stops, published: b.published === undefined ? Boolean(prev.published) : Boolean(b.published) };
+}
+
+async function myStudio(req) {
+  const user = await requireUser(req);
+  const list = await getMany(`mytour/${user.id}/`);
+  return json(list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+}
+
+async function createStudio(req) {
+  const user = await requireUser(req);
+  const b = await body(req);
+  const now = new Date().toISOString();
+  const tour = { id: newId(), userId: user.id, author: shortName(user.name), college: user.college || "", ...cleanStudio(b), createdAt: now, updatedAt: now };
+  await db().set(studioKey(user.id, tour.id), tour);
+  await db().set(`mytourref/${tour.id}`, { uid: user.id });
+  return json(tour, 201);
+}
+
+async function loadStudio(id) {
+  const ref = await db().get(`mytourref/${id}`);
+  return ref ? db().get(studioKey(ref.uid, id)) : null;
+}
+
+async function updateStudio(req, id) {
+  const user = await requireUser(req);
+  const tour = await db().get(studioKey(user.id, id));
+  if (!tour) throw new HttpError(404, "Ekskursiya topilmadi");
+  Object.assign(tour, cleanStudio(await body(req), tour), { updatedAt: new Date().toISOString() });
+  await db().set(studioKey(user.id, id), tour);
+  return json(tour);
+}
+
+async function deleteStudio(req, id) {
+  const user = await requireUser(req);
+  await db().del(studioKey(user.id, id));
+  await db().del(`mytourref/${id}`);
+  return json({ ok: true });
+}
+
+async function viewStudio(req, id) {
+  const tour = await loadStudio(id);
+  if (!tour) throw new HttpError(404, "Ekskursiya topilmadi");
+  if (!tour.published) {
+    const user = await requireUser(req).catch(() => null);
+    if (!user || (user.id !== tour.userId && user.role !== "teacher")) throw new HttpError(403, "Muallif bu ekskursiyani hali ulashmagan");
+  }
+  const { userId, ...pub } = tour;
+  return json(pub);
+}
+
+function demoReview(tour, reason = "AI kaliti ulanmagan") {
+  const lines = [`“${tour.title}” ekskursiyasi bo'yicha avtomatik tahlil (${reason}):`];
+  tour.stops.forEach((s, i) => {
+    const words = s.narration.split(/\s+/).filter(Boolean).length;
+    const tips = [];
+    if (words < 40) tips.push("matn juda qisqa — kamida 60–120 so'z (taxminan 1 daqiqa) yozing");
+    if (words > 220) tips.push("matn uzun — guruh diqqatini ushlab turish uchun 2 daqiqadan oshirmang");
+    if (!/\d/.test(s.narration)) tips.push("aniq sana yoki raqam qo'shing");
+    if (!/\?/.test(s.narration)) tips.push("guruhga savol bering — interaktivlik oshadi");
+    if (!s.facts.length) tips.push("2–3 ta qisqa fakt qo'shing");
+    lines.push(`${i + 1}) ${s.title || "Nomsiz bekat"}: ${words} so'z. ${tips.length ? `Tavsiya: ${tips.join("; ")}.` : "Yaxshi tuzilgan!"}`);
+  });
+  lines.push("Umumiy: ekskursiyani salomlashish va reja bilan boshlang, oxirida xulosa va minnatdorchilik bildiring.");
+  return lines.join("\n");
+}
+
+async function reviewStudio(req, id) {
+  const user = await requireUser(req);
+  const tour = await db().get(studioKey(user.id, id));
+  if (!tour) throw new HttpError(404, "Ekskursiya topilmadi");
+  if (!tour.stops.length) throw new HttpError(400, "Avval kamida bitta bekat qo'shing");
+  let text;
+  if (!aiEnabled()) text = demoReview(tour);
+  else {
+    const content = tour.stops.map((s, i) => `${i + 1}-bekat: ${s.title} (${s.city})\nGid matni: ${s.narration}\nFaktlar: ${s.facts.join("; ")}`).join("\n\n");
+    text = await completeText({
+      system: "Sen tajribali gid-metodist va O'zbekiston tarixi bo'yicha mutaxassissan. Turizm texnikumi o'quvchisi tayyorlagan virtual ekskursiya matnini o'zbek tilida (lotin) tahlil qil. Markdown belgilari (*, #) ishlatma. Tuzilma: 1) Umumiy baho (10 ballik) va bir gapda xulosa; 2) Har bir bekat bo'yicha: faktlar aniqligi (shubhali yoki noto'g'ri faktlarni aniq ko'rsat), hikoya tuzilmasi (qiziqtiruvchi boshlanish, asosiy ma'lumot, rivoyat yoki qiziq detal, guruh bilan muloqot), til va uslub, davomiyligi; 3) Uchta eng muhim tavsiya. Qisqa va aniq yoz.",
+      messages: [{ role: "user", content: `Ekskursiya: ${tour.title}\n${tour.description}\n\n${content}` }],
+      maxTokens: 1400,
+    }).catch(() => "");
+    if (!text) text = demoReview(tour, "AI xizmati hozir javob bermadi");
+  }
+  tour.review = { text, at: new Date().toISOString() };
+  await db().set(studioKey(user.id, id), tour);
+  return json(tour.review);
+}
+
+async function adminStudio(req) {
+  await requireTeacher(req);
+  const list = await getMany("mytour/");
+  return json(list.map(({ userId, ...t }) => t).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
 }
 
 // ---------- AI Ustoz (mavzu bo'yicha yordamchi) ----------
@@ -1086,6 +1253,7 @@ function describeError(err) {
 
 async function health() {
   const checks = { blobs: "tekshirilmoqda", jwtSecret: process.env.JWT_SECRET ? "o'rnatilgan" : "avtomatik (omborda)", teacherCode: process.env.TEACHER_CODE ? "o'rnatilgan" : "o'rnatilmagan", ai: provider() ? `${provider()} (${modelName()})` : "demo-rejim", node: process.version };
+  checks.tts = ttsEnabled() ? `gemini (${(await ttsModels().catch(() => []))[0] || "model topilmadi"})` : "o'chiq (brauzer ovozi)";
   try {
     await db().set("meta/health", { at: new Date().toISOString() });
     await db().get("meta/health");
@@ -1460,7 +1628,6 @@ const routes = [
 
   ["GET", /^trainer\/scenarios$/, async () => json({ scenarios: SCENARIOS.map(publicScenario), criteria: CRITERIA, aiEnabled: aiEnabled(), voiceAI: voiceEnabled() })],
   ["POST", /^trainer\/chat$/, trainerChat],
-  ["POST", /^trainer\/tts$/, trainerTts],
   ["POST", /^trainer\/transcribe$/, trainerTranscribe],
   ["POST", /^trainer\/hint$/, trainerHint],
   ["POST", /^trainer\/evaluate$/, trainerEvaluate],
@@ -1483,6 +1650,18 @@ const routes = [
 
   ["GET", /^evidence$/, myEvidence],
   ["GET", /^leaderboard$/, leaderboard],
+  ["GET", /^studio$/, myStudio],
+  ["POST", /^studio$/, createStudio],
+  ["GET", /^studio\/view\/([\w-]+)$/, viewStudio],
+  ["PUT", /^studio\/([\w-]+)$/, updateStudio],
+  ["DELETE", /^studio\/([\w-]+)$/, deleteStudio],
+  ["POST", /^studio\/([\w-]+)\/review$/, reviewStudio],
+  ["GET", /^admin\/studio$/, adminStudio],
+  ["POST", /^tts$/, ttsSpeak],
+  ["GET", /^tts$/, ttsInfo],
+  ["GET", /^tts\/audio\/([0-9a-f]{40})\.mp3$/, ttsAudio],
+  ["GET", /^admin\/tts$/, adminTts],
+  ["PUT", /^admin\/tts$/, setTtsSettings],
   ["POST", /^topics\/([\w-]+)\/ask$/, topicAsk],
   ["GET", /^certificate$/, myCertificate],
   ["POST", /^certificate$/, issueCertificate],

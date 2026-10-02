@@ -11,6 +11,10 @@ import { mapFromEvidence, competencyTable } from "../competency.js";
 import { TOPICS } from "../../data/topics.js";
 import { slideViewer, uploadSlides, fmtSize } from "../slides.js";
 import { allVideos, videoCard, uploadVideo, invalidateVideos } from "../media.js";
+import { audioUrl, audioInfo, chunkText, ttsInfo, resetTtsInfo } from "../narrator.js";
+import { buildScenes } from "../lesson-player.js";
+import { bookParagraphs } from "../audiobook.js";
+import { TOUR } from "./tour.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
@@ -25,6 +29,8 @@ const TABS = [
   ["builder", "🛠 So'rovnoma konstruktori"],
   ["slides", "🖥️ Taqdimotlar"],
   ["videos", "📹 Video darslar"],
+  ["voices", "🔊 AI ovozlar"],
+  ["studio", "🎬 Ekskursiyalar"],
   ["students", "👥 O'quvchilar"],
   ["trainer", "🎙 Trenajyor natijalari"],
   ["self-study", "🧩 Mustaqil ishlar"],
@@ -39,7 +45,7 @@ export async function render(el, tab = "", param) {
     content
   );
   mount(content, loading());
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   await view(content, param);
@@ -225,6 +231,143 @@ async function slidesManager(el) {
       " fayllar (20 MB gacha) PowerPoint Online orqali ko'rsatiladi. Faylni kartaga sudrab tashlash ham mumkin."
     ),
     h("div", { class: "stack sm-list" }, TOPICS.map(row))
+  );
+}
+
+// ---------------- O'quvchilar ekskursiyalari ----------------
+
+async function studioList(el) {
+  const list = await api.get("admin/studio");
+  mount(
+    el,
+    h("p", { class: "muted" }, "O'quvchilar “Ekskursiya studiyasi”da yaratgan virtual ekskursiyalar. Ularni ko'rib, sinfda muhokama qilishingiz yoki loyiha ishi sifatida baholashingiz mumkin."),
+    list.length
+      ? h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, h("th", {}, "Ekskursiya"), h("th", {}, "Muallif"), h("th", {}, "Bekatlar"), h("th", {}, "Holat"), h("th", {}, "AI tahlili"), h("th", {}, "Yangilangan"), h("th", {}))),
+          h("tbody", {}, list.map((t) => h("tr", {}, h("td", {}, h("b", {}, t.title)), h("td", {}, t.author, t.college && h("div", { class: "muted small" }, t.college)), h("td", {}, t.stops.length), h("td", {}, t.published ? h("span", { class: "badge badge-ok" }, "Ulashilgan") : h("span", { class: "badge" }, "Qoralama")), h("td", {}, t.review ? "✓" : "—"), h("td", {}, fmtDate(t.updatedAt)), h("td", {}, h("a", { class: "btn small ghost", href: `#/studio/view/${t.id}` }, "▶ Ko'rish")))))))
+      : emptyState("🎬", "Hali ekskursiyalar yo'q", "O'quvchilar “Virtual sayohat” sahifasidan studiyaga o'tib, o'z ekskursiyasini yaratadi.")
+  );
+}
+
+// ---------------- AI ovozlar (Gemini TTS) ----------------
+
+async function voicesManager(el) {
+  const st = await api.get("admin/tts");
+  const fmtMin = (sec) => `${Math.floor(sec / 60)} daq ${Math.round(sec % 60)} s`;
+  if (!st.enabled) {
+    mount(el, h("div", { class: "alert alert-warn" }, h("b", {}, "AI ovozi o'chiq. "), "Netlify sozlamalarida GEMINI_API_KEY o'zgaruvchisini qo'shing — shundan keyin trenajyor, animatsion darslar, virtual sayohat va audiokitob o'zbek tilida tabiiy AI ovozida gapiradi."));
+    return;
+  }
+  let voice = st.defaultVoice;
+  const audio = new Audio();
+  const voiceCards = h(
+    "div",
+    { class: "voice-cards" },
+    st.voices.map((v) =>
+      h("div", { class: `voice-card ${v.id === voice ? "active" : ""}`, "data-id": v.id },
+        h("span", { class: "vc-avatar" }, v.gender === "female" ? "👩" : "👨"),
+        h("b", {}, v.id), h("small", { class: "muted" }, v.label.split("— ")[1]),
+        h("div", { class: "row" },
+          h("button", { class: "btn small ghost", onclick: async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.textContent = "⏳";
+            try {
+              audio.src = await audioUrl("Assalomu alaykum! Men Safar akademiyaning AI ovoziman. Bugun Samarqandning Registon maydoni bo'ylab virtual sayohatga chiqamiz.", { voice: v.id, style: "guide" });
+              await audio.play();
+            } catch (err) {
+              toast(err.message, "error");
+            }
+            btn.disabled = false;
+            btn.textContent = "▶ Tinglash";
+          } }, "▶ Tinglash"),
+          h("button", { class: "btn small", onclick: async () => {
+            try {
+              await api.put("admin/tts", { voice: v.id });
+              voice = v.id;
+              resetTtsInfo();
+              await ttsInfo();
+              voiceCards.querySelectorAll(".voice-card").forEach((c) => c.classList.toggle("active", c.dataset.id === v.id));
+              toast(`Platforma ovozi: ${v.id}`, "ok");
+            } catch (err) {
+              toast(err.message, "error");
+            }
+          } }, "Tanlash")))
+    )
+  );
+
+  // Oldindan tayyorlash navbati
+  const log = h("div", { class: "muted small" });
+  const bar = h("div", { class: "sm-upload" }, h("div", { class: "sm-upload-fill" }), h("span", {}, "—"));
+  let running = false;
+  let stopRequested = false;
+  const jobs = {
+    lessons: () => TOPICS.flatMap((t) => buildScenes(t).flatMap((sc) => chunkText(sc.narration).map((text) => ({ text, style: "narrator" })))),
+    tour: () => TOUR.flatMap((s) => chunkText(s.narration).map((text) => ({ text, style: "guide" }))),
+    ...Object.fromEntries(TOPICS.map((t) => [`book-${t.id}`, () => bookParagraphs(t).flatMap((p) => chunkText(p.text).map((text) => ({ text, style: "narrator" })))])),
+  };
+  const run = async (key, label) => {
+    if (running) return toast("Navbat allaqachon ishlayapti", "warn");
+    await ttsInfo();
+    const list = jobs[key]();
+    running = true;
+    stopRequested = false;
+    let done = 0;
+    let fresh = 0;
+    const setP = () => {
+      bar.firstChild.style.transform = `scaleX(${done / list.length})`;
+      bar.lastChild.textContent = `${label}: ${done} / ${list.length}`;
+    };
+    setP();
+    for (const item of list) {
+      if (stopRequested) break;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const d = await audioInfo(item.text, { style: item.style });
+          if (!d.cached) fresh++;
+          break;
+        } catch (err) {
+          if (err.status === 429 && attempt < 40 && !stopRequested) {
+            for (let s = 65; s > 0 && !stopRequested; s--) {
+              log.textContent = `⏳ Gemini bepul limiti: ${s} soniyadan keyin davom etamiz (${done}/${list.length}). Sahifani ochiq qoldiring.`;
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+            continue;
+          }
+          log.textContent = `⚠️ ${err.message}`;
+          stopRequested = true;
+          break;
+        }
+      }
+      done++;
+      setP();
+      log.textContent = `${fresh} ta yangi ovoz yaratildi, qolganlari keshda bor edi.`;
+    }
+    running = false;
+    toast(stopRequested ? "Navbat to'xtatildi" : `${label}: tayyor!`, stopRequested ? "warn" : "ok");
+  };
+
+  mount(
+    el,
+    h("div", { class: "grid cols-4" },
+      h("div", { class: "card stat-card" }, h("div", { class: "stat-icon" }, "🔊"), h("b", {}, "Yoqilgan"), h("span", { class: "muted small" }, `Model: ${st.models[0] || "—"}`)),
+      h("div", { class: "card stat-card" }, h("div", { class: "stat-icon" }, "💾"), h("b", {}, st.cached), h("span", { class: "muted small" }, "keshdagi audio")),
+      h("div", { class: "card stat-card" }, h("div", { class: "stat-icon" }, "⏱"), h("b", {}, fmtMin(st.seconds)), h("span", { class: "muted small" }, "umumiy davomiylik")),
+      h("div", { class: "card stat-card" }, h("div", { class: "stat-icon" }, "📦"), h("b", {}, `${(st.bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB`), h("span", { class: "muted small" }, "MP3 hajmi"))),
+    h("div", { class: "card" },
+      h("h3", {}, "🎙 Platforma ovozi"),
+      h("p", { class: "muted small" }, "Animatsion darslar, virtual sayohat va audiokitob shu ovoz bilan o'qiladi (trenajyor personajlari esa jinsiga qarab turli ovozlarda gapiradi). Har bir matn bir marta yaratilib, barcha o'quvchilar uchun keshlanadi."),
+      voiceCards),
+    h("div", { class: "card stack" },
+      h("h3", {}, "⚡ Ovozlarni oldindan tayyorlash"),
+      h("p", { class: "muted small" }, "Gemini bepul tarifida TTS so'rovlari soni cheklangan. Ovozlarni oldindan tayyorlab qo'ysangiz, o'quvchilar darhol tinglaydi va limit sarflanmaydi. Limit tugasa navbat avtomatik kutib, davom etadi — kerak bo'lsa ertaga qayta ishga tushiring: tayyorlanganlari o'tkazib yuboriladi."),
+      h("div", { class: "row wrap" },
+        h("button", { class: "btn", onclick: () => run("lessons", "Animatsion darslar") }, `🎬 Animatsion darslar (${jobs.lessons().length})`),
+        h("button", { class: "btn", onclick: () => run("tour", "Virtual sayohat") }, `🧭 Virtual sayohat (${jobs.tour().length})`),
+        h("button", { class: "btn ghost danger-text", onclick: () => (stopRequested = true) }, "⏹ To'xtatish")),
+      h("div", { class: "row wrap" }, h("span", { class: "muted small" }, "🎧 Audiokitob:"), TOPICS.map((t) => h("button", { class: "chip", title: t.title, onclick: () => run(`book-${t.id}`, `${t.num}-mavzu audiokitobi`) }, `${t.num}-mavzu`))),
+      bar,
+      log)
   );
 }
 

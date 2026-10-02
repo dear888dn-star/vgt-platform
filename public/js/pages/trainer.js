@@ -234,14 +234,13 @@ function startSession(el, s, criteria, voiceOn = false) {
   const engineSel = h(
     "select",
     { "aria-label": "Ovoz manbai", onchange: () => voice.setEngine(engineSel.value) },
-    h("option", { value: "auto" }, "Ovoz: avtomatik"),
-    h("option", { value: "browser" }, "Brauzer ovozi"),
-    h("option", { value: "ai", disabled: !s.voiceAI }, `AI ovozi (Gemini)${s.voiceAI ? "" : " — sozlanmagan"}`)
+    h("option", { value: "auto" }, s.voiceAI ? "🔊 AI ovozi (o'zbekcha)" : "Ovoz: avtomatik"),
+    h("option", { value: "browser" }, "Brauzer ovozi")
   );
   const rateSel = h("select", { "aria-label": "Nutq tezligi", onchange: () => voice.setRate(Number(rateSel.value)) }, [0.85, 1, 1.15, 1.3].map((r) => h("option", { value: r }, `Tezlik ×${String(r).replace(".", ",")}`)));
   const autoChk = h("input", { type: "checkbox", onchange: () => voice.setAutoListen(autoChk.checked) });
   if (voice) {
-    engineSel.value = voice.state.engine;
+    engineSel.value = voice.state.engine === "browser" ? "browser" : "auto";
     rateSel.value = String(voice.state.rate);
     autoChk.checked = voice.state.autoListen;
   }
@@ -278,11 +277,11 @@ function startSession(el, s, criteria, voiceOn = false) {
     if (!voiceMode) return voice?.stop();
     const info = await voice.info();
     vHint.textContent =
-      info.mode === "native"
-        ? `Ovoz: ${info.voice || "brauzer"}`
-        : info.mode === "turkish"
-          ? `Brauzeringizda o'zbekcha ovoz topilmadi — yaqin turkiy ovoz ishlatilmoqda${s.voiceAI ? "; tabiiyroq ovoz uchun “AI ovozi”ni tanlang" : ""}. Eng yaxshi o'zbekcha ovoz: Microsoft Edge.`
-          : `O'zbekcha ovoz topilmadi${s.voiceAI ? " — AI ovozi ishlatiladi" : ""}. Microsoft Edge brauzerida o'zbekcha ovozlar mavjud.`;
+      s.voiceAI && voice.state.engine !== "browser"
+        ? "🔊 AI ovozi (Gemini) — personajlar o'zbek tilida, har biri o'z ovozi bilan gapiradi."
+        : info.mode === "native"
+          ? `Brauzer ovozi: ${info.voice || "standart"}`
+          : "Brauzerda o'zbekcha ovoz yo'q — tabiiy o'zbekcha ovoz uchun administrator GEMINI_API_KEY ni sozlashi kerak.";
     const lastBot = [...chat.querySelectorAll(".msg.bot .msg-text")].at(-1);
     if (lastBot && !busy) speakThenListen(lastBot.textContent);
   }

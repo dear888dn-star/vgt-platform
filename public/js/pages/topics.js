@@ -3,6 +3,7 @@ import { api, session } from "../api.js";
 import { slideViewer } from "../slides.js";
 import { tutorDrawer } from "../tutor.js";
 import { lessonPlayer } from "../lesson-player.js";
+import { audiobook } from "../audiobook.js";
 import { allVideos, videoCard } from "../media.js";
 import { TOPICS, METHOD_INFO, COURSE, BOOK_INTRO, LITERATURE } from "../../data/topics.js";
 import { loadProgress, topicState, updateTopic, topicCompletion, setNote } from "../progress.js";
@@ -94,7 +95,7 @@ export async function renderTopic(el, id) {
     chapter("video", "🎬", "Animatsion dars", "Mavzuning qisqa animatsion bayoni: ovozli hikoya, subtitrlar va jonli infografika", player),
     videos.length > 0 && chapter("videos", "📹", "Video darslar", `${videos.length} ta video — o'qituvchi tomonidan joylangan`, h("div", { class: "video-grid" }, videos.map((v) => videoCard(v)))),
     viewer && chapter("slides", "🖥️", "Taqdimot", slides.kind === "pdf" ? `${slides.pages ? `${slides.pages} ta slayd · ` : ""}strelkalar, svayp yoki ⛶ to'liq ekran` : slides.title, viewer),
-    chapter("theory", "📖", "Nazariya", `${topic.sections.length} bo'lim · ~${minutes} daqiqa o'qish`, theoryBlock(topic)),
+    chapter("theory", "📖", "Nazariya", `${topic.sections.length} bo'lim · ~${minutes} daqiqa o'qish · 🎧 tinglash mumkin`, theoryBlock(topic, (sec) => book.start(sec))),
     chapter("glossary", "🃏", "Tayanch tushunchalar", `${topic.glossary.length} ta tushuncha — kartani bosing`, glossaryTab(topic)),
     chapter("methods", "🧠", "Interaktiv metodlar", `${topic.methods.length} ta topshiriq`, methodsTab(topic)),
     chapter("questions", "❓", "Nazorat savollari", `${topic.questions.length} ta savol (o'quv qo'llanmadan)`, questionsTab(topic)),
@@ -112,6 +113,11 @@ export async function renderTopic(el, id) {
     ])
   );
 
+  const book = audiobook(topic, body);
+  body.addEventListener("audiobook:done", () => {
+    updateTopic(topic.id, (st) => (st.read = true));
+    changed();
+  });
   const notesBtn = notesDrawer(topic);
   const tutor = tutorDrawer(topic);
 
@@ -184,6 +190,7 @@ export async function renderTopic(el, id) {
     spy.disconnect();
     notesBtn.remove();
     tutor.destroy();
+    book.destroy();
     player.destroy();
     viewer?.destroy?.();
   };
@@ -215,7 +222,7 @@ function notesDrawer(topic) {
   return wrap;
 }
 
-function theoryBlock(topic) {
+function theoryBlock(topic, listen) {
   const st = topicState(topic.id);
   const readBtn = h("button", { class: `btn lg ${st.read ? "ghost" : ""}`, onclick: () => {
     updateTopic(topic.id, (s) => (s.read = true));
@@ -228,10 +235,16 @@ function theoryBlock(topic) {
   return h(
     "div",
     { class: "stack" },
-    h("div", { class: "card plan-card reveal" }, h("h3", {}, "🗒 Dars rejasi"), h("ol", { class: "plan-steps" }, topic.plan.map((p) => h("li", {}, p.replace(/^\d+\.\d+\.\s*/, ""))))),
+    h("div", { class: "card plan-card reveal" },
+      h("div", { class: "row between wrap" }, h("h3", {}, "🗒 Dars rejasi"), h("button", { class: "btn listen-all", onclick: () => listen() }, h("span", { class: "eq-mini", "aria-hidden": "true" }, h("i"), h("i"), h("i")), "Butun nazariyani tinglash")),
+      h("ol", { class: "plan-steps" }, topic.plan.map((p) => h("li", {}, p.replace(/^\d+\.\d+\.\s*/, "")))),
+      h("p", { class: "muted small" }, "🎧 Audiokitob: matn AI ovozida o'zbek tilida o'qiladi, o'qilayotgan xatboshi belgilanadi. Istalgan xatboshini ikki marta bossangiz, o'sha joydan davom etadi.")),
     topic.sections.map((s) => {
       if (s.title) secIdx++;
-      return h("article", { class: "card book-section reveal", ...(s.title ? { id: `sec-${secIdx}`, "data-sec": String(secIdx) } : {}) }, s.title && h("h3", { class: "section-heading" }, s.title), h("div", { class: "book-text prose", html: s.html }));
+      const art = h("article", { class: "card book-section reveal", ...(s.title ? { id: `sec-${secIdx}`, "data-sec": String(secIdx) } : {}) },
+        h("div", { class: "section-head-row" }, s.title && h("h3", { class: "section-heading" }, s.title), h("button", { class: "listen-btn", title: "Shu bo'limni tinglash", "aria-label": "Shu bo'limni tinglash", onclick: () => listen(art) }, "🎧")),
+        h("div", { class: "book-text prose", html: s.html }));
+      return art;
     }),
     h("div", { class: "row between wrap reveal" }, h("p", { class: "muted small" }, "Manba: ", COURSE.source), readBtn)
   );

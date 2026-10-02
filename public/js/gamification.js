@@ -26,6 +26,7 @@ export const XP_RULES = [
   ["Diagnostika bo'limini topshirish", 10],
   ["Kunlik takrorlashdagi har bir karta", 1],
   ["Ketma-ket faol kun (seriya)", 5],
+  ["Ulashilgan virtual ekskursiya (3+ bekat)", 40],
 ];
 
 const dayKey = (d) => d.toISOString().slice(0, 10);
@@ -95,6 +96,8 @@ export function computeGame(evidence = {}, today = new Date()) {
   const diagSections = (evidence.diag || []).reduce((s, d) => s + (d.sections || 0), 0);
   bySource.diagnostics = diagSections * 10;
 
+  const tours = (evidence.studio || []).filter((t) => t.published && t.stops >= 3);
+  bySource.studio = Math.min(tours.length, 3) * 40 + (evidence.studio || []).filter((t) => t.reviewed).length * 5;
   const reviews = Math.min(progress.srsStats?.reviews || 0, 600);
   bySource.review = reviews;
   const streak = streakOf(progress.activity, today);
@@ -118,6 +121,7 @@ export function computeGame(evidence = {}, today = new Date()) {
     diagStages: (evidence.diag || []).filter((d) => d.sections >= 4).length,
     reviews,
     mastered: Object.values(progress.srs || {}).filter((c) => c.box >= 4).length,
+    toursPublished: tours.length,
     streak,
     longest,
     activeDays: Object.keys(progress.activity || {}).length,
@@ -143,6 +147,7 @@ export const BADGES = [
   { id: "diag", icon: "🧪", title: "O'zini bilgan", text: "Diagnostika bosqichini to'liq topshiring", test: (s) => s.diagStages >= 1 },
   { id: "review", icon: "🔁", title: "Xotira chempioni", text: "100 ta kartani takrorlang", test: (s) => s.reviews >= 100, progress: (s) => s.reviews / 100 },
   { id: "mastered", icon: "💎", title: "Lug'at boyligi", text: "30 ta tushunchani to'liq yodlang", test: (s) => s.mastered >= 30, progress: (s) => s.mastered / 30 },
+  { id: "studio", icon: "🎬", title: "Ekskursiya muallifi", text: "3+ bekatli virtual ekskursiya yarating va ulashing", test: (s) => s.toursPublished >= 1 },
   { id: "streak3", icon: "🔥", title: "Uch kunlik safar", text: "3 kun ketma-ket o'qing", test: (s) => s.longest >= 3, progress: (s) => s.longest / 3 },
   { id: "streak7", icon: "⚡", title: "Haftalik marafon", text: "7 kun ketma-ket o'qing", test: (s) => s.longest >= 7, progress: (s) => s.longest / 7 },
 ];

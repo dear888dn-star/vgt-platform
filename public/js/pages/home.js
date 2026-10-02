@@ -73,6 +73,9 @@ export async function render(el) {
     ["🗺️", "Marshrut laboratoriyasi", "Turistik marshrutni raqamli xaritada modellashtirish: obyektlar bazasi, masofa va vaqt, marshrut pasporti.", "#/route-lab"],
     ["🧩", "Mustaqil ta'lim", "Shaxsiy o'quv rejasi, mustaqil ish topshiriqlari, o'qituvchi bahosi va refleksiv kundalik.", "#/self-study"],
     ["📝", "Kompleks diagnostika", "T0–T2 bosqichlarida anketa, test, amaliy topshiriqlar va refleksiya — natijalar avtomatik hisoblanadi.", "#/diagnostics"],
+    ["🎬", "Mediateka va audiokitob", "Animatsion darslar, video darslar, taqdimotlar — va qo'llanma matnini o'zbekcha AI ovozida tinglash.", "#/media"],
+    ["🧭", "Ekskursiya studiyasi", "O'z virtual ekskursiyangizni yarating: manzaralar, gid matni, AI ovozi va AI metodist tahlili. Havola orqali ulashing.", "#/studio"],
+    ["🛂", "Safar pasporti", "XP, darajalar, viza muhrlari, nishonlar, reyting va kursni tugatganlik sertifikati.", "#/passport"],
     ["🎯", "Kasb standarti", "Gid tarjimon kasb standarti: mehnat funksiyalari, kompetensiyalar va shaxsiy kompetensiya xaritangiz.", "#/standard"],
   ];
 

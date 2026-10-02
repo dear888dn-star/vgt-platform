@@ -93,7 +93,7 @@ export async function render(el) {
         h("div", { class: "eyebrow" }, "Mediateka"),
         h("h1", {}, "Ko'ring, tinglang, o'rganing"),
         h("p", { class: "lead" }, "15 ta animatsion dars, o'qituvchilar joylagan video darslar, taqdimotlar va Buyuk ipak yo'li bo'ylab virtual sayohat — barchasi bir joyda."),
-        h("div", { class: "row wrap" }, h("button", { class: "btn lg play-btn", onclick: introVideo }, h("span", { class: "play-ring" }, "▶"), "Platforma haqida video"), h("a", { class: "btn lg ghost light", href: "#/tour" }, "🧭 Virtual sayohat"))
+        h("div", { class: "row wrap" }, h("button", { class: "btn lg play-btn", onclick: introVideo }, h("span", { class: "play-ring" }, "▶"), "Platforma haqida video"), h("a", { class: "btn lg ghost light", href: "#/tour" }, "🧭 Virtual sayohat"), h("a", { class: "btn lg ghost light", href: "#/studio" }, "🎬 Ekskursiya studiyasi"))
       )
     ),
     tabs,

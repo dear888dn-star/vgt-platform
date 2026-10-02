@@ -2,6 +2,8 @@
 // jonli piktogrammalar, so'zma-so'z chiquvchi matn, subtitrlar va ovozli hikoya (brauzer ovozi).
 import { h } from "./ui.js";
 import { createVoice } from "./voice.js";
+import { createNarrator, aiVoiceReady } from "./narrator.js";
+import { toast } from "./ui.js";
 import { confetti, reducedMotion } from "./motion.js";
 import { sceneSVG } from "./landmarks.js";
 
@@ -59,7 +61,15 @@ export function lessonPlayer(topic, { onComplete } = {}) {
   let timer = null;
   let token = 0;
   let started = false;
-  const voice = window.speechSynthesis ? createVoice({ id: "lesson", language: "o'zbek", speakers: { Ustoz: "female" } }, { engine: "browser", persist: false }) : null;
+  const bvoice = window.speechSynthesis ? createVoice({ id: "lesson", language: "o'zbek", speakers: { Ustoz: "female" } }, { engine: "browser", persist: false }) : null;
+  let noticed = false;
+  // AI ovozi (Gemini, o'zbekcha) — asosiy; ishlamasa brauzer ovozi.
+  const voice = createNarrator({
+    onLevel: (l) => player?.style.setProperty("--lvl", l.toFixed(3)),
+    onNotice: (m) => !noticed && ((noticed = true), toast(m, "warn")),
+    fallback: bvoice && { speak: (t) => bvoice.speak(t), stop: () => bvoice.cancelSpeech() },
+  });
+  const voiceOpts = { style: "narrator" };
 
   const stage = h("div", { class: "lp-stage", tabindex: "0", "aria-label": `${topic.title} — animatsion dars` });
   const caption = h("div", { class: "lp-caption", "aria-live": "polite" });
@@ -67,8 +77,10 @@ export function lessonPlayer(topic, { onComplete } = {}) {
   const playBtn = h("button", { class: "lp-btn lp-play", "aria-label": "Ijro etish", onclick: () => toggle() }, "▶");
   const muteBtn = h("button", { class: "lp-btn", title: "Ovoz", "aria-label": "Ovozni yoqish/o'chirish", onclick: () => setMuted(!muted) }, muted ? "🔇" : "🔊");
   const ccBtn = h("button", { class: "lp-btn on", title: "Subtitrlar", "aria-label": "Subtitrlar", onclick: () => { captions = !captions; ccBtn.classList.toggle("on", captions); caption.classList.toggle("hidden", !captions); } }, "CC");
-  const rateBtn = h("button", { class: "lp-btn", title: "Tezlik", onclick: () => { rate = rate === 1 ? 1.25 : rate === 1.25 ? 0.85 : 1; rateBtn.textContent = `×${String(rate).replace(".", ",")}`; voice?.setRate(rate); } }, "×1");
+  const rateBtn = h("button", { class: "lp-btn", title: "Tezlik", onclick: () => { rate = rate === 1 ? 1.25 : rate === 1.25 ? 0.85 : 1; rateBtn.textContent = `×${String(rate).replace(".", ",")}`; voice.setRate(rate); bvoice?.setRate(rate); } }, "×1");
   const counter = h("span", { class: "lp-count" });
+  const voiceBadge = h("span", { class: "lp-voice-badge hidden", title: "Gemini AI ovozi — o'zbek tilida" }, "🔊 AI ovoz");
+  aiVoiceReady().then((ok) => voiceBadge.classList.toggle("hidden", !ok));
   const poster = h(
     "button",
     { class: "lp-poster", "aria-label": "Animatsion darsni boshlash", onclick: () => toggle() },
@@ -88,7 +100,7 @@ export function lessonPlayer(topic, { onComplete } = {}) {
       h("button", { class: "lp-btn", "aria-label": "Keyingi sahna", onclick: () => go(idx + 1) }, "⏭"),
       counter,
       h("span", { class: "lp-spacer" }),
-      muteBtn, ccBtn, rateBtn,
+      voiceBadge, muteBtn, ccBtn, rateBtn,
       h("button", { class: "lp-btn", title: "To'liq ekran", "aria-label": "To'liq ekran", onclick: () => (document.fullscreenElement ? document.exitFullscreen() : player.requestFullscreen?.().catch(() => {})) }, "⛶"))
   );
 
@@ -98,7 +110,7 @@ export function lessonPlayer(topic, { onComplete } = {}) {
     try {
       localStorage.setItem("vgt.lesson.muted", muted ? "1" : "0");
     } catch {}
-    if (muted) voice?.cancelSpeech();
+    if (muted) voice.stop();
     if (playing) go(idx, true);
   }
 
@@ -189,8 +201,9 @@ export function lessonPlayer(topic, { onComplete } = {}) {
     idx = i;
     const my = ++token;
     clearTimeout(timer);
-    voice?.cancelSpeech();
+    voice.stop();
     const s = scenes[i];
+    if (!muted) voice.prefetch(scenes[i + 1]?.narration, voiceOpts);
     const old = [...stage.children];
     const el = renderScene(s, i);
     el.classList.add(dir > 0 ? "enter-next" : "enter-prev");
@@ -215,9 +228,9 @@ export function lessonPlayer(topic, { onComplete } = {}) {
     const est = sceneDuration(s);
     fillCurrent(est);
     const startT = Date.now();
-    if (voice && !muted) {
+    if (!muted) {
       try {
-        await voice.speak(s.narration);
+        await voice.speak(s.narration, voiceOpts);
       } catch {}
     }
     if (my !== token || !playing) return;
@@ -243,7 +256,7 @@ export function lessonPlayer(topic, { onComplete } = {}) {
       go(!started || idx === scenes.length - 1 ? 0 : idx, true);
     } else {
       clearTimeout(timer);
-      voice?.cancelSpeech();
+      voice.stop();
       const fill = bars.children[idx]?.firstChild;
       if (fill) {
         const w = fill.getBoundingClientRect().width / fill.parentElement.getBoundingClientRect().width;
@@ -274,7 +287,8 @@ export function lessonPlayer(topic, { onComplete } = {}) {
     playing = false;
     clearTimeout(timer);
     document.removeEventListener("keydown", onKey);
-    voice?.destroy();
+    voice.stop();
+    bvoice?.destroy();
   };
   return player;
 }

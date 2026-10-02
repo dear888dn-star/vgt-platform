@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@breezystack/lamejs": "^1.2.7",
     "@netlify/blobs": "^11.1.2"
   }
 }

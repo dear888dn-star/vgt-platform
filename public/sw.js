@@ -1,7 +1,7 @@
 // Safar akademiya — service worker: ilovani o'rnatish va internetsiz rejim.
 // Statik fayllar (sahifa, uslublar, skriptlar, mavzu rasmlari) keshdan tez ochiladi va fonda yangilanadi.
-// API so'rovlari keshlanmaydi (taqdimot bo'laklaridan tashqari — ular o'zgarmaydi).
-const VERSION = "safar-v2";
+// API so'rovlari keshlanmaydi (taqdimot/video bo'laklari va AI ovoz fayllaridan tashqari — ular o'zgarmaydi).
+const VERSION = "safar-v3";
 const SHELL = ["/", "/index.html", "/css/style.css", "/css/motion.css", "/css/features.css", "/css/media.css", "/js/app.js", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -21,7 +21,7 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== location.origin) return;
 
   // Taqdimot bo'laklari o'zgarmaydi — avval kesh.
-  if (/^\/api\/slides\/[\w-]+\/chunk\//.test(url.pathname)) {
+  if (/^\/api\/(slides\/[\w-]+\/chunk\/|tts\/audio\/|videos\/[\w-]+\/[\w-]+\/chunk\/)/.test(url.pathname)) {
     e.respondWith(caches.open(VERSION).then(async (c) => (await c.match(req)) || fetch(req).then((r) => (r.ok && c.put(req, r.clone()), r))));
     return;
   }

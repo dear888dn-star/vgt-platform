@@ -12,6 +12,7 @@ const SOURCES = [
   ["diagnostics", "🧪 Diagnostika"],
   ["review", "🔁 Takrorlash"],
   ["streak", "🔥 Seriya"],
+  ["studio", "🎬 Ekskursiya"],
 ];
 
 export async function render(el) {

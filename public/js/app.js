@@ -22,6 +22,7 @@ import * as review from "./pages/review.js";
 import * as cert from "./pages/cert.js";
 import * as tour from "./pages/tour.js";
 import * as media from "./pages/media.js";
+import * as studio from "./pages/studio.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -44,6 +45,9 @@ const routes = [
   [/^\/review$/, review.render],
   [/^\/tour$/, tour.render],
   [/^\/media$/, media.render],
+  [/^\/studio$/, studio.renderList, { auth: true }],
+  [/^\/studio\/view\/([\w-]+)$/, studio.renderView],
+  [/^\/studio\/([\w-]+)$/, studio.renderEditor, { auth: true }],
   [/^\/cert\/([\w-]+)$/, cert.render],
 ];
 

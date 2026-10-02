@@ -3,9 +3,11 @@
 import { h, mount } from "../ui.js";
 import { mountScene } from "../landmarks.js";
 import { createVoice } from "../voice.js";
+import { createNarrator, aiVoiceReady } from "../narrator.js";
+import { toast } from "../ui.js";
 import { reducedMotion } from "../motion.js";
 
-const TOUR = [
+export const TOUR = [
   {
     city: "Toshkent", landmark: "tashkent", time: "day", title: "Hazrati Imom majmuasi", lat: 41.3386, lng: 69.2405,
     narration: "Sayohatimizni poytaxt Toshkentdan boshlaymiz. Hazrati Imom majmuasi shaharning eng muhim ziyoratgohlaridan biri. Majmuadagi Muyi Muborak kutubxonasida qadimiy Usmon Qur'oni saqlanadi.",
@@ -60,10 +62,10 @@ const TOUR = [
 // Sxematik xarita proyeksiyasi (taxminiy)
 const proj = (lat, lng) => [((lng - 59.4) / (70.2 - 59.4)) * 960 + 20, ((42.2 - lat) / (42.2 - 38.4)) * 360 + 30];
 
-function routeMap() {
-  const pts = TOUR.map((s) => proj(s.lat, s.lng));
+function routeMap(stops) {
+  const pts = stops.map((s) => proj(s.lat, s.lng));
   const d = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-  const cities = [...new Map(TOUR.map((s, i) => [s.city, i])).entries()];
+  const cities = [...new Map(stops.map((s, i) => [s.city, i])).entries()];
   return `<svg viewBox="0 0 1000 420" class="tour-map-svg" role="img" aria-label="Sayohat marshruti sxemasi">
     <defs><linearGradient id="tmg" x1="0" x2="1"><stop offset="0" stop-color="#e9d3a4"/><stop offset="1" stop-color="#d9bf8a"/></linearGradient>
     <pattern id="dunes" width="40" height="16" patternUnits="userSpaceOnUse"><path d="M0 12 q10 -8 20 0 t20 0" stroke="#c8a76d" fill="none" opacity=".5"/></pattern></defs>
@@ -79,22 +81,45 @@ function routeMap() {
 }
 
 export async function render(el) {
+  return playTour(el, {
+    stops: TOUR,
+    hero: h(
+      "section",
+      { class: "tour-hero" },
+      h("div", {}, h("div", { class: "eyebrow" }, "Namunaviy virtual ekskursiya"), h("h1", {}, "🧭 Buyuk ipak yo'li bo'ylab"), h("p", { class: "lead" }, "Toshkentdan Xivagacha 7 bekat. Har bir bekatda obida manzarasi, ovozli gid hikoyasi, asosiy faktlar va bo'lajak gid uchun metodik maslahat bor. Tomosha qiling, keyin trenajyorda o'zingiz gid bo'lib ko'ring yoki “Ekskursiya studiyasi”da o'z ekskursiyangizni yarating."), h("a", { class: "btn ghost", href: "#/studio" }, "🎬 O'z ekskursiyamni yaratish")),
+      h("div", { class: "tour-hero-stats" }, [["7", "bekat"], ["5", "shahar"], ["4", "YuNESKO obyekti"]].map(([n, l]) => h("div", {}, h("b", {}, n), h("span", {}, l))))
+    ),
+  });
+}
+
+/** Ekskursiya pleyeri: namunaviy sayohat va o'quvchilar yaratgan ekskursiyalar uchun umumiy. */
+export function playTour(el, { stops, hero, aside }) {
+  const geo = stops.length > 1 && stops.every((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
   let idx = 0;
   let playing = false;
   let muted = false;
   let timer;
   let token = 0;
-  const voice = window.speechSynthesis ? createVoice({ id: "tour", language: "o'zbek", speakers: { Gid: "female" } }, { engine: "browser", persist: false }) : null;
+  const bvoice = window.speechSynthesis ? createVoice({ id: "tour", language: "o'zbek", speakers: { Gid: "female" } }, { engine: "browser", persist: false }) : null;
+  let noticed = false;
+  const voice = createNarrator({
+    onLevel: (l) => document.querySelector(".tour-player")?.style.setProperty("--lvl", l.toFixed(3)),
+    onNotice: (m) => !noticed && ((noticed = true), toast(m, "warn")),
+    fallback: bvoice && { speak: (t) => bvoice.speak(t), stop: () => bvoice.cancelSpeech() },
+  });
+  const voiceOpts = { style: "guide" };
 
   const stage = h("div", { class: "tour-stage" });
   const overlayTitle = h("div", { class: "tour-overlay" });
   const caption = h("div", { class: "tour-caption", "aria-live": "polite" });
-  const bars = h("div", { class: "lp-bars" }, TOUR.map((s, i) => h("button", { class: "lp-bar", "aria-label": s.title, onclick: () => go(i) }, h("i"))));
+  const bars = h("div", { class: "lp-bars" }, stops.map((s, i) => h("button", { class: "lp-bar", "aria-label": s.title, onclick: () => go(i) }, h("i"))));
   const playBtn = h("button", { class: "lp-btn lp-play", "aria-label": "Ijro etish", onclick: () => toggle() }, "▶");
-  const muteBtn = h("button", { class: "lp-btn", "aria-label": "Ovoz", onclick: () => { muted = !muted; muteBtn.textContent = muted ? "🔇" : "🔊"; if (muted) voice?.cancelSpeech(); } }, "🔊");
+  const muteBtn = h("button", { class: "lp-btn", "aria-label": "Ovoz", onclick: () => { muted = !muted; muteBtn.textContent = muted ? "🔇" : "🔊"; if (muted) voice.stop(); } }, "🔊");
   const factsBox = h("div", { class: "card tour-facts" });
-  const mapBox = h("div", { class: "card tour-map", html: routeMap() });
-  const stopsList = h("ol", { class: "tour-stops" }, TOUR.map((s, i) => h("li", {}, h("button", { onclick: () => go(i) }, h("span", { class: "ts-num" }, i + 1), h("span", {}, h("b", {}, s.title), h("small", {}, s.city))))));
+  const voiceBadge = h("span", { class: "lp-voice-badge hidden", title: "Gemini AI ovozi — o'zbek tilida" }, "🔊 AI ovoz");
+  aiVoiceReady().then((ok) => voiceBadge.classList.toggle("hidden", !ok));
+  const mapBox = geo ? h("div", { class: "card tour-map", html: routeMap(stops) }) : null;
+  const stopsList = h("ol", { class: "tour-stops" }, stops.map((s, i) => h("li", {}, h("button", { onclick: () => go(i) }, h("span", { class: "ts-num" }, i + 1), h("span", {}, h("b", {}, s.title), h("small", {}, s.city))))));
   const player = h(
     "div",
     { class: "tour-player lesson-player" },
@@ -106,36 +131,36 @@ export async function render(el) {
       h("button", { class: "lp-btn", "aria-label": "Keyingi bekat", onclick: () => go(idx + 1) }, "⏭"),
       h("span", { class: "lp-count tour-count" }),
       h("span", { class: "lp-spacer" }),
+      voiceBadge,
       muteBtn,
       h("button", { class: "lp-btn", "aria-label": "To'liq ekran", onclick: () => (document.fullscreenElement ? document.exitFullscreen() : player.requestFullscreen?.().catch(() => {})) }, "⛶"))
   );
 
   mount(
     el,
-    h(
-      "section",
-      { class: "tour-hero" },
-      h("div", {}, h("div", { class: "eyebrow" }, "Namunaviy virtual ekskursiya"), h("h1", {}, "🧭 Buyuk ipak yo'li bo'ylab"), h("p", { class: "lead" }, "Toshkentdan Xivagacha 7 bekat. Har bir bekatda obida manzarasi, ovozli gid hikoyasi, asosiy faktlar va bo'lajak gid uchun metodik maslahat bor. Tomosha qiling, keyin trenajyorda o'zingiz gid bo'lib ko'ring.")),
-      h("div", { class: "tour-hero-stats" }, [["7", "bekat"], ["5", "shahar"], ["4", "YuNESKO obyekti"]].map(([n, l]) => h("div", {}, h("b", {}, n), h("span", {}, l))))
-    ),
+    hero,
     player,
-    h("div", { class: "tour-grid" }, factsBox, h("div", { class: "stack" }, mapBox, h("div", { class: "card" }, h("h3", {}, "🚏 Bekatlar"), stopsList)))
+    h("div", { class: "tour-grid" }, factsBox, h("div", { class: "stack" }, geo && mapBox, h("div", { class: "card" }, h("h3", {}, "🚏 Bekatlar"), stopsList), aside))
   );
 
-  const traveler = mapBox.querySelector(".tm-traveler");
-  const routePath = mapBox.querySelector(".tm-route");
-  const total = routePath.getTotalLength();
-  const segLen = TOUR.map((s, i) => {
+  const traveler = mapBox?.querySelector(".tm-traveler");
+  const routePath = mapBox?.querySelector(".tm-route");
+  const total = routePath ? routePath.getTotalLength() : 0;
+  const segLen = stops.map((s, i) => {
     if (!i) return 0;
-    const [x0, y0] = proj(TOUR[i - 1].lat, TOUR[i - 1].lng);
+    if (!geo) return 0;
+    const [x0, y0] = proj(stops[i - 1].lat, stops[i - 1].lng);
     const [x1, y1] = proj(s.lat, s.lng);
     return Math.hypot(x1 - x0, y1 - y0);
   });
   const cum = segLen.map((_, i) => segLen.slice(0, i + 1).reduce((a, b) => a + b, 0));
-  routePath.style.strokeDasharray = `${total}`;
-  routePath.style.strokeDashoffset = `${total}`;
+  if (routePath) {
+    routePath.style.strokeDasharray = `${total}`;
+    routePath.style.strokeDashoffset = `${total}`;
+  }
   let travelerAt = 0;
   const moveTraveler = (to) => {
+    if (!routePath) return;
     const from = travelerAt;
     const target = cum[to];
     const t0 = performance.now();
@@ -154,7 +179,7 @@ export async function render(el) {
   };
 
   function show(i, dir) {
-    const s = TOUR[i];
+    const s = stops[i];
     const layer = h("div", { class: `tour-layer ${dir >= 0 ? "enter-next" : "enter-prev"}` });
     mountScene(layer, { landmark: s.landmark, time: s.time });
     stage.append(layer);
@@ -163,14 +188,14 @@ export async function render(el) {
       o.classList.add("leaving");
       setTimeout(() => o.remove(), 1200);
     });
-    overlayTitle.replaceChildren(h("span", { class: "tour-chip" }, `📍 ${s.city} · ${i + 1}/${TOUR.length}`), h("h2", {}, s.title));
+    overlayTitle.replaceChildren(h("span", { class: "tour-chip" }, `📍 ${s.city} · ${i + 1}/${stops.length}`), h("h2", {}, s.title));
     caption.replaceChildren(...s.narration.split(/\s+/).map((w, k) => h("span", { style: { "--k": k } }, `${w} `)));
-    player.querySelector(".tour-count").textContent = `${i + 1} / ${TOUR.length}`;
+    player.querySelector(".tour-count").textContent = `${i + 1} / ${stops.length}`;
     factsBox.replaceChildren(
-      h("div", { class: "row between wrap" }, h("h3", {}, `${s.title}`), h("a", { class: "btn small ghost", href: `https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}`, target: "_blank", rel: "noopener" }, "📍 Xaritada ochish")),
-      h("ul", { class: "tour-fact-list" }, s.facts.map((f, k) => h("li", { style: { "--k": k } }, "✦ ", f))),
-      h("div", { class: "tour-tip" }, h("b", {}, "🎓 Gid uchun maslahat"), h("p", {}, s.tip)),
-      h("a", { class: "btn", href: `#/trainer/${s.trainer}` }, "🎙️ Trenajyorda shunga o'xshash vaziyatni mashq qilish")
+      h("div", { class: "row between wrap" }, h("h3", {}, `${s.title}`), Number.isFinite(s.lat) ? h("a", { class: "btn small ghost", href: `https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}`, target: "_blank", rel: "noopener" }, "📍 Xaritada ochish") : s.city && h("a", { class: "btn small ghost", href: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${s.title}, ${s.city}`)}`, target: "_blank", rel: "noopener" }, "📍 Xaritada qidirish")),
+      s.facts?.length > 0 && h("ul", { class: "tour-fact-list" }, s.facts.map((f, k) => h("li", { style: { "--k": k } }, "✦ ", f))),
+      s.tip && h("div", { class: "tour-tip" }, h("b", {}, "🎓 Gid uchun maslahat"), h("p", {}, s.tip)),
+      s.trainer && h("a", { class: "btn", href: `#/trainer/${s.trainer}` }, "🎙️ Trenajyorda shunga o'xshash vaziyatni mashq qilish")
     );
     stopsList.querySelectorAll("li").forEach((li, k) => li.classList.toggle("active", k === i));
     bars.querySelectorAll(".lp-bar").forEach((b, k) => {
@@ -183,16 +208,17 @@ export async function render(el) {
   }
 
   async function go(i, restart = false) {
-    if (i < 0 || i >= TOUR.length) return;
+    if (i < 0 || i >= stops.length) return;
     if (i === idx && !restart && stage.children.length) return;
     const dir = i - idx;
     idx = i;
     const my = ++token;
     clearTimeout(timer);
-    voice?.cancelSpeech();
+    voice.stop();
     show(i, dir);
+    if (!muted) voice.prefetch(stops[i + 1]?.narration, voiceOpts);
     if (!playing) return;
-    const s = TOUR[i];
+    const s = stops[i];
     const est = Math.max(7000, s.narration.split(/\s+/).length * 430);
     const fill = bars.children[i].firstChild;
     void fill.offsetWidth;
@@ -201,15 +227,15 @@ export async function render(el) {
     caption.classList.add("reading");
     caption.style.setProperty("--dur", `${est}ms`);
     const t0 = Date.now();
-    if (voice && !muted) {
+    if (!muted) {
       try {
-        await voice.speak(s.narration);
+        await voice.speak(s.narration, voiceOpts);
       } catch {}
     }
     if (my !== token || !playing) return;
     timer = setTimeout(() => {
       if (my !== token || !playing) return;
-      if (idx < TOUR.length - 1) go(idx + 1);
+      if (idx < stops.length - 1) go(idx + 1);
       else toggle();
     }, Math.max(Date.now() - t0 > 1500 ? 1500 : est - (Date.now() - t0), 400)); // ovoz bo'lmasa — taxminiy vaqt
   }
@@ -218,10 +244,10 @@ export async function render(el) {
     playing = !playing;
     playBtn.textContent = playing ? "⏸" : "▶";
     player.classList.toggle("playing", playing);
-    if (playing) go(idx === TOUR.length - 1 && caption.classList.contains("reading") ? 0 : idx, true);
+    if (playing) go(idx === stops.length - 1 && caption.classList.contains("reading") ? 0 : idx, true);
     else {
       clearTimeout(timer);
-      voice?.cancelSpeech();
+      voice.stop();
       caption.classList.remove("reading");
     }
   }
@@ -240,6 +266,7 @@ export async function render(el) {
     playing = false;
     clearTimeout(timer);
     document.removeEventListener("keydown", onKey);
-    voice?.destroy();
+    voice.stop();
+    bvoice?.destroy();
   };
 }
