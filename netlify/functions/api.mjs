@@ -551,6 +551,83 @@ const withOpening = (s, history) => [
   ...history,
 ];
 
+// ---------- AI baholash javobini ishonchli o'qish ----------
+// Model ballarni turli shaklda qaytarishi mumkin: boshqa kalit nomi, "16/20" matni, {score: 16} obyekti,
+// 0–1 yoki 0–100 shkala, ```json``` ichida. Avval bularning barchasi jimgina 0 ga aylanib qolardi.
+
+const CRIT_ALIASES = {
+  communication: ["communication", "muloqot", "nutq", "communic"],
+  knowledge: ["knowledge", "bilim", "fakt", "kasbiy bilim"],
+  problem: ["problem", "muammo", "qaror"],
+  digital: ["digital", "raqamli", "texnolog"],
+  service: ["service", "mijoz", "etika", "xizmat"],
+};
+
+function toScore(v, max = 20) {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "object") return toScore(v.score ?? v.ball ?? v.value ?? v.points ?? v.baho, max);
+  if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
+  const str2 = String(v).replace(",", ".");
+  const frac = str2.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+  if (frac) return (Number(frac[1]) / Number(frac[2])) * max;
+  const n = str2.match(/-?\d+(?:\.\d+)?/);
+  return n ? Number(n[0]) : undefined;
+}
+
+export function parseEvaluation(raw) {
+  let text = String(raw || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  let obj = null;
+  try {
+    obj = JSON.parse(text);
+  } catch {
+    const a = text.indexOf("{");
+    const b = text.lastIndexOf("}");
+    if (a >= 0 && b > a) {
+      try {
+        obj = JSON.parse(text.slice(a, b + 1));
+      } catch {}
+    }
+  }
+  if (!obj || typeof obj !== "object") return { found: 0, complete: false, scores: {}, text: null };
+  let src = obj.scores ?? obj.ballar ?? obj.baholar ?? obj.criteria ?? obj.mezonlar ?? obj;
+  // Massiv ko'rinishi: [{key|criterion|name, score}]
+  if (Array.isArray(src)) src = Object.fromEntries(src.map((x) => [String(x.key ?? x.criterion ?? x.name ?? x.mezon ?? ""), x]));
+  const entries = Object.entries(src || {});
+  const scores = {};
+  for (const c of CRITERIA) {
+    let v = src?.[c.key];
+    if (v === undefined) {
+      const hit = entries.find(([k]) => {
+        const kk = k.toLowerCase();
+        return kk.includes(c.title.toLowerCase().slice(0, 10)) || CRIT_ALIASES[c.key].some((a) => kk.includes(a));
+      });
+      v = hit?.[1];
+    }
+    scores[c.key] = toScore(v, c.max);
+  }
+  const vals = Object.values(scores).filter((v) => Number.isFinite(v));
+  // Shkalani moslashtirish: 0–1 (ulush) yoki 0–100 (foiz) bo'lsa — 0–20 ga o'tkazamiz.
+  if (vals.length && vals.every((v) => v <= 1) && vals.some((v) => v > 0)) for (const k in scores) if (Number.isFinite(scores[k])) scores[k] *= 20;
+  if (vals.some((v) => v > 20) && vals.every((v) => v <= 100)) for (const k in scores) if (Number.isFinite(scores[k])) scores[k] = (scores[k] / 100) * 20;
+  const found = Object.values(scores).filter((v) => Number.isFinite(v)).length;
+  const pickArr = (...keys) => {
+    for (const k of keys) if (obj[k] !== undefined) return Array.isArray(obj[k]) ? obj[k].map(String) : [String(obj[k])];
+    return [];
+  };
+  return {
+    found,
+    complete: found === CRITERIA.length,
+    scores,
+    text: {
+      summary: String(obj.summary ?? obj.xulosa ?? obj.umumiy ?? ""),
+      standard: String(obj.standard ?? obj.standart ?? ""),
+      strengths: pickArr("strengths", "kuchli_tomonlar"),
+      improvements: pickArr("improvements", "kamchiliklar"),
+      recommendations: pickArr("recommendations", "tavsiyalar"),
+    },
+  };
+}
+
 function transcriptOf(s, history) {
   return [`TURIST/PERSONAJ: ${s.opening}`, ...history.map((m) => `${m.role === "user" ? "GID (o'quvchi)" : "TURIST/PERSONAJ"}: ${m.content}`)].join("\n\n");
 }
@@ -615,26 +692,66 @@ async function trainerEvaluate(req) {
   if (history.filter((m) => m.role === "user").length < 2) throw new HttpError(400, "Baholash uchun kamida 2 ta javob yozing");
 
   let evaluation;
+  let evalDebug;
   if (!aiEnabled()) {
     evaluation = demoEvaluation(s, history, meta);
   } else {
-    const raw = await completeText({
-      system: "Sen pedagogik baholovchi ekspertsan. Javobni faqat berilgan JSON sxemasiga mos holda qaytar.",
-      messages: [{ role: "user", content: evaluationPrompt(s, transcriptOf(s, history), meta) }],
-      maxTokens: 4000,
-      effort: "low",
-      format: { type: "json_schema", schema: EVALUATION_SCHEMA },
-    }).catch((e) => {
-      console.error(e);
-      throw new HttpError(502, "AI baholash xizmati javob bermadi, qayta urinib ko'ring");
-    });
-    try {
-      evaluation = JSON.parse(raw);
-    } catch {
-      throw new HttpError(502, "AI baholash natijasini o'qib bo'lmadi, qayta urinib ko'ring");
+    const ask = (strict) =>
+      completeText({
+        system: "Sen pedagogik baholovchi ekspertsan. Javobni faqat berilgan JSON sxemasiga mos holda qaytar. Ballar butun son (0–20) bo'lsin.",
+        messages: [{ role: "user", content: evaluationPrompt(s, transcriptOf(s, history), meta) + (strict ? `\n\nMUHIM: javob FAQAT JSON obyekt bo'lsin, hech qanday izohsiz. "scores" ichida aynan shu kalitlar bo'lsin: ${CRITERIA.map((c) => c.key).join(", ")} — har biri 0 dan 20 gacha butun son. Namuna: {"scores":{${CRITERIA.map((c) => `"${c.key}":14`).join(",")}},"summary":"...","standard":"...","strengths":["..."],"improvements":["..."],"recommendations":["..."]}` : "") }],
+        maxTokens: 6000,
+        effort: "low",
+        format: { type: "json_schema", schema: EVALUATION_SCHEMA },
+      });
+    let raw = "";
+    let parsed = null;
+    let failures = 0;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let r;
+      try {
+        r = await ask(attempt > 0);
+      } catch (e) {
+        console.error("AI baholash xatosi:", e);
+        failures++;
+        continue;
+      }
+      raw = r;
+      const p2 = parseEvaluation(r);
+      if (!parsed || p2.found > parsed.found) parsed = p2;
+      if (parsed.complete) break;
+      console.error(`AI baholash: ballar to'liq emas (${attempt + 1}-urinish):`, String(r).slice(0, 800));
+    }
+    if (failures === 2) throw new HttpError(502, "AI baholash xizmati javob bermadi, qayta urinib ko'ring");
+    if (!parsed || parsed.found === 0) {
+      // AI ballarni umuman qaytarmadi — 0 qo'ymaymiz: taxminiy ball + AI matni (bo'lsa) va ochiq belgi.
+      const demo = demoEvaluation(s, history, meta);
+      const t = parsed?.text || {};
+      const pick = (k) => (Array.isArray(t[k]) ? t[k].length : t[k]) ? t[k] : demo[k];
+      evaluation = {
+        scores: demo.scores,
+        summary: `${pick("summary") === demo.summary ? "" : `${t.summary} `}(AI ballarni qaytarmadi — ballar javoblaringiz asosida taxminiy hisoblandi.)`.trim(),
+        standard: pick("standard"),
+        strengths: pick("strengths"),
+        improvements: pick("improvements"),
+        recommendations: pick("recommendations"),
+        estimated: true,
+      };
+      evalDebug = String(raw).slice(0, 1500);
+    } else {
+      evaluation = { ...parsed.text, scores: parsed.scores };
+      if (!parsed.complete) {
+        // Yetishmagan mezonlar — mavjudlarining o'rtachasi bilan to'ldiriladi.
+        const vals = Object.values(parsed.scores).filter((v) => Number.isFinite(v));
+        const avgV = vals.reduce((a, b) => a + b, 0) / vals.length;
+        for (const c of CRITERIA) if (!Number.isFinite(evaluation.scores[c.key])) evaluation.scores[c.key] = Math.round(avgV);
+        evaluation.estimated = true;
+        evalDebug = String(raw).slice(0, 1500);
+      }
     }
   }
-  for (const c of CRITERIA) evaluation.scores[c.key] = Math.max(0, Math.min(c.max, Math.round(evaluation.scores[c.key] || 0)));
+  for (const c of CRITERIA) evaluation.scores[c.key] = Math.max(0, Math.min(c.max, Math.round(Number(evaluation.scores[c.key]) || 0)));
+  for (const k of ["strengths", "improvements", "recommendations"]) if (!Array.isArray(evaluation[k])) evaluation[k] = evaluation[k] ? [String(evaluation[k])] : [];
   const total = CRITERIA.reduce((sum, c) => sum + evaluation.scores[c.key], 0);
 
   const session = {
@@ -650,6 +767,7 @@ async function trainerEvaluate(req) {
     voice: b.voice === true,
     evaluation,
     total,
+    ...(evalDebug ? { evalDebug } : {}),
     model: modelName(),
     createdAt: new Date().toISOString(),
   };

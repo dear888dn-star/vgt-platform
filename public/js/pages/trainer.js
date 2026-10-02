@@ -144,7 +144,7 @@ export function evaluationView(session, criteria = DEFAULT_CRITERIA) {
       "div",
       { class: "eval-top" },
       h("div", { class: `score-ring ${scoreClass(session.total)}`, style: { "--pct": session.total } }, h("b", {}, session.total), h("span", {}, "/100")),
-      h("div", {}, h("h3", {}, session.total >= 80 ? "A'lo natija! 🏆" : session.total >= 60 ? "Yaxshi natija 👍" : "Mashq qilishni davom eting 💪"), h("p", {}, ev.summary), ev.demo && h("span", { class: "badge badge-warn" }, "Demo-baholash"))
+      h("div", {}, h("h3", {}, session.total >= 80 ? "A'lo natija! 🏆" : session.total >= 60 ? "Yaxshi natija 👍" : "Mashq qilishni davom eting 💪"), h("p", {}, ev.summary), ev.demo && h("span", { class: "badge badge-warn" }, "Demo-baholash"), ev.estimated && h("span", { class: "badge badge-warn", title: "AI javobidan ballarning bir qismi olinmadi — ular taxminiy to'ldirildi" }, "Taxminiy ball"))
     ),
     ev.standard && h("div", { class: "alert alert-info" }, h("b", {}, "🎯 Kasb standarti talablariga moslik: "), ev.standard),
     h("div", { class: "criteria" }, crit.map((c) => h("div", { class: "criterion" }, h("div", { class: "row between small" }, h("span", {}, c.title), h("b", {}, `${ev.scores[c.key]}/${c.max}`)), h("div", { class: "progress" }, h("div", { class: "progress-fill", style: { width: `${(ev.scores[c.key] / c.max) * 100}%` } }))))),
