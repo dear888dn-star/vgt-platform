@@ -72,9 +72,11 @@ export async function render(el, tab = "", param) {
       el,
       h("div", { class: "tp-head", style: { "--hue": g[2] } },
         h("a", { class: "btn ghost small tp-back", href: "#/teacher" }, "← Barcha bo'limlar"),
-        h("div", { class: "tp-title" }, h("span", { class: "tp-icon" }, sec.icon), h("div", {}, h("small", { class: "muted" }, g[1]), h("h1", {}, sec.title))),
-        h("select", { class: "tp-switch", "aria-label": "Boshqa bo'limga o'tish", onchange: (e) => (location.hash = sectionHref(e.target.value)) },
-          GROUPS.map(([gk, gl]) => h("optgroup", { label: gl }, SECTIONS.filter((x) => x.group === gk).map((x) => h("option", { value: x.key, selected: x.key === sec.key }, `${x.icon} ${x.title}`)))))),
+        h("div", { class: "tp-title" }, h("span", { class: "tp-icon" }, sec.icon), h("div", {}, h("small", { class: "muted" }, g[1]), h("h1", {}, sec.title)))),
+      h("nav", { class: "tp-tiles", "aria-label": "Panel bo'limlari" }, SECTIONS.map((x) => {
+        const xg = GROUPS.find(([k]) => k === x.group);
+        return h("a", { class: `tp-tile ${x.key === sec.key ? "active" : ""}`, href: sectionHref(x.key), style: { "--hue": xg[2] }, "aria-current": x.key === sec.key ? "page" : null }, h("span", {}, x.icon), h("b", {}, x.title));
+      })),
       content
     );
   } else {
