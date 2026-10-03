@@ -135,7 +135,6 @@ toggle.addEventListener("click", () => {
 });
 window.addEventListener("hashchange", route);
 window.addEventListener("vgt:auth", renderNav);
-document.getElementById("year").textContent = new Date().getFullYear();
 main.setAttribute("tabindex", "-1");
 initTopbar();
 initTools();
