@@ -29,6 +29,7 @@ const routes = [
   [/^\/?$/, home.render],
   [/^\/login$/, auth.renderLogin],
   [/^\/register$/, auth.renderRegister],
+  [/^\/forgot$/, auth.renderForgot],
   [/^\/topics$/, topics.renderList],
   [/^\/topics\/([\w-]+)$/, topics.renderTopic],
   [/^\/self-study$/, selfStudy.render, { auth: true }],

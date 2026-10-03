@@ -37,11 +37,53 @@ export function renderLogin(el) {
     h("p", { class: "muted" }, "Email va parolingizni kiriting."),
     field("Email", { name: "email", type: "email", required: true, autocomplete: "email" }),
     field("Parol", { name: "password", type: "password", required: true, autocomplete: "current-password" }),
+    h("p", { class: "small", style: { margin: "-6px 0 0", textAlign: "right" } }, h("a", { href: "#/forgot" }, "Parolni unutdingizmi?")),
     err,
     h("button", { class: "btn block lg", type: "submit" }, "Kirish"),
     h("p", { class: "center muted" }, "Profilingiz yo'qmi? ", h("a", { href: "#/register" }, "Ro'yxatdan o'ting"))
   );
   mount(el, h("div", { class: "auth-wrap" }, form));
+}
+
+export function renderForgot(el) {
+  const err = h("div");
+  const form = h(
+    "form",
+    { class: "stack", onsubmit: async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      err.replaceChildren();
+      if (fd.get("newPassword") !== fd.get("newPassword2")) return err.replaceChildren(h("div", { class: "alert alert-error" }, "Parollar mos kelmadi"));
+      const btn = form.querySelector("button");
+      btn.disabled = true;
+      try {
+        const res = await api.post("auth/reset", { email: fd.get("email"), teacherCode: fd.get("teacherCode"), newPassword: fd.get("newPassword") });
+        session.set(res.token, res.user);
+        toast("Parol yangilandi. Xush kelibsiz!", "ok");
+        afterLogin();
+      } catch (ex) {
+        err.replaceChildren(h("div", { class: "alert alert-error" }, ex.message));
+      } finally {
+        btn.disabled = false;
+      }
+    } },
+    field("Email", { name: "email", type: "email", required: true, autocomplete: "email" }),
+    field("O'qituvchi kodi", { name: "teacherCode", type: "password", required: true, autocomplete: "off" }),
+    h("p", { class: "muted small" }, "Ro'yxatdan o'tishda kiritilgan kod. U Netlify sozlamalarida saqlanadi: Site configuration → Environment variables → TEACHER_CODE."),
+    h("div", { class: "grid cols-2" }, field("Yangi parol", { name: "newPassword", type: "password", required: true, minlength: 6, autocomplete: "new-password" }), field("Yangi parolni takrorlang", { name: "newPassword2", type: "password", required: true, minlength: 6, autocomplete: "new-password" })),
+    err,
+    h("button", { class: "btn block lg", type: "submit" }, "Parolni yangilash va kirish")
+  );
+  mount(
+    el,
+    h("div", { class: "auth-wrap" },
+      h("div", { class: "card auth-card" },
+        h("h1", {}, "Parolni tiklash"),
+        h("div", { class: "alert alert-info" }, h("b", {}, "🎓 O'quvchimisiz? "), "O'qituvchingizga murojaat qiling — u panelning “O'quvchilar” bo'limida 🔑 tugmasi orqali sizga vaqtinchalik parol beradi. Kirgach, uni Profil sahifasida o'zgartiring."),
+        h("h3", {}, "👩‍🏫 O'qituvchi uchun"),
+        form,
+        h("p", { class: "center muted" }, h("a", { href: "#/login" }, "← Kirish sahifasiga qaytish"))))
+  );
 }
 
 /** Tajriba (TG) yoki nazorat (NG) guruhini tanlash kartalari. */

@@ -1172,11 +1172,20 @@ async function students(el) {
             } catch (ex) {
               toast(ex.message, "error");
             }
-          } }, Object.entries(COHORTS).map(([k, v]) => h("option", { value: k, selected: (u.cohort || "unassigned") === k }, v))), u.cohortSource === "self" && h("div", { class: "muted small" }, "o'quvchi o'zi tanlagan"))
+          } }, Object.entries(COHORTS).map(([k, v]) => h("option", { value: k, selected: (u.cohort || "unassigned") === k }, v))), u.cohortSource === "self" && h("div", { class: "muted small" }, "o'quvchi o'zi tanlagan")),
+          h("td", {}, h("button", { class: "btn small ghost", title: "Parolni tiklash (vaqtinchalik parol berish)", onclick: async (e) => {
+            if (!confirm(`${u.name} uchun yangi vaqtinchalik parol yaratilsinmi? Eski parol ishlamay qoladi.`)) return;
+            try {
+              const { password } = await api.post(`admin/students/${u.id}/password`, {});
+              e.target.closest("td").replaceChildren(h("code", { class: "temp-pass", title: "O'quvchiga bering; u kirgach Profil sahifasida o'zgartiradi" }, password), h("button", { class: "btn small ghost", onclick: () => navigator.clipboard?.writeText(password).then(() => toast("Nusxa olindi", "ok")) }, "📋"));
+            } catch (ex) {
+              toast(ex.message, "error");
+            }
+          } }, "🔑"))
         )
       )
     );
-    if (!rows.length) tbody.append(h("tr", {}, h("td", { colspan: 6, class: "muted center" }, "O'quvchilar topilmadi")));
+    if (!rows.length) tbody.append(h("tr", {}, h("td", { colspan: 7, class: "muted center" }, "O'quvchilar topilmadi")));
   };
 
   const bulkGroup = h("select", {}, h("option", { value: "" }, "Guruhni tanlang"), groups.map((g) => h("option", { value: g }, g)));
@@ -1210,7 +1219,7 @@ async function students(el) {
         h("span", { class: "muted small" }, `Jami: ${list.length} o'quvchi`),
         h("button", { class: "btn ghost", onclick: () => downloadFile("oquvchilar.csv", toCSV([["F.I.Sh.", "Email", "Guruh", "Muassasa", "Tadqiqot guruhi", "Ro'yxatdan o'tgan"], ...list.map((u) => [u.name, u.email, u.group, u.college, COHORTS[u.cohort || "unassigned"], fmtDate(u.createdAt)])])) }, "⬇ CSV")
       ),
-      h("table", { class: "table" }, h("thead", {}, h("tr", {}, h("th", {}, "F.I.Sh."), h("th", {}, "Email"), h("th", {}, "Guruh"), h("th", {}, "Muassasa"), h("th", {}, "Ro'yxatdan o'tgan"), h("th", {}, "Tadqiqot guruhi"))), tbody)
+      h("table", { class: "table" }, h("thead", {}, h("tr", {}, h("th", {}, "F.I.Sh."), h("th", {}, "Email"), h("th", {}, "Guruh"), h("th", {}, "Muassasa"), h("th", {}, "Ro'yxatdan o'tgan"), h("th", {}, "Tadqiqot guruhi"), h("th", {}, "Parol"))), tbody)
     ),
     teachers.length > 0 && h("div", { class: "card" }, h("h3", {}, `O'qituvchilar (${teachers.length})`), h("ul", {}, teachers.map((t) => h("li", {}, `${t.name} — ${t.email}${t.college ? ` (${t.college})` : ""}`))))
   );

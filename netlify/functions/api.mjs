@@ -63,7 +63,9 @@ async function currentUser(req) {
   const auth = req.headers.get("authorization") || "";
   const data = readToken(auth.replace(/^Bearer\s+/i, ""));
   if (!data) return null;
-  return db().get(userKey(data.uid));
+  const user = await db().get(userKey(data.uid));
+  // Parol tiklanganda eski kirishlar (boshqa qurilmalardagi) bekor bo'ladi.
+  return user && (user.pwdV || 0) === (data.pv || 0) ? user : null;
 }
 
 async function requireUser(req) {
@@ -127,6 +129,54 @@ async function login(req) {
     throw new HttpError(401, "Email yoki parol noto'g'ri");
   }
   return json({ token: createToken(user), user: publicUser(user) });
+}
+
+// ---------- Parolni tiklash ----------
+// O'qituvchi: email + o'qituvchi kodi (TEACHER_CODE) orqali yangi parol o'rnatadi.
+// O'quvchi: o'qituvchi panelidan vaqtinchalik parol oladi (adminResetPassword).
+const RESET_LIMIT = 5;
+const RESET_WINDOW_MS = 15 * 60_000;
+
+async function resetPassword(req) {
+  const b = await body(req);
+  const email = str(b.email, 120).toLowerCase();
+  const newPassword = typeof b.newPassword === "string" ? b.newPassword : "";
+  const code = process.env.TEACHER_CODE;
+  if (!code) throw new HttpError(403, "O'qituvchi kodi sozlanmagan (Netlify → Environment variables → TEACHER_CODE)");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, "Email noto'g'ri kiritilgan");
+  if (newPassword.length < 6) throw new HttpError(400, "Yangi parol kamida 6 belgidan iborat bo'lishi kerak");
+  const store = db();
+  const rlKey = `ratelimit/reset/${crypto.createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
+  const rl = (await store.get(rlKey)) || { count: 0, since: Date.now() };
+  if (Date.now() - rl.since > RESET_WINDOW_MS) Object.assign(rl, { count: 0, since: Date.now() });
+  if (rl.count >= RESET_LIMIT) throw new HttpError(429, "Urinishlar ko'p bo'ldi. 15 daqiqadan keyin qayta urinib ko'ring.");
+  if (str(b.teacherCode) !== code) {
+    rl.count++;
+    await store.set(rlKey, rl);
+    await new Promise((r) => setTimeout(r, 700));
+    throw new HttpError(403, `O'qituvchi kodi noto'g'ri (qolgan urinishlar: ${RESET_LIMIT - rl.count})`);
+  }
+  const ref = await store.get(emailKey(email));
+  const user = ref && (await store.get(userKey(ref.id)));
+  if (!user) throw new HttpError(404, "Bu email bilan profil topilmadi");
+  if (user.role !== "teacher") throw new HttpError(403, "O'quvchi parolini o'qituvchi panel orqali tiklaydi (O'quvchilar bo'limi → 🔑)");
+  Object.assign(user, await hashPassword(newPassword), { pwdV: (user.pwdV || 0) + 1, pwdResetAt: new Date().toISOString() });
+  await store.set(userKey(user.id), user);
+  await store.del(rlKey);
+  return json({ token: createToken(user), user: publicUser(user) });
+}
+
+async function adminResetPassword(req, id) {
+  await requireTeacher(req);
+  const user = await db().get(userKey(id));
+  if (!user) throw new HttpError(404, "Foydalanuvchi topilmadi");
+  if (user.role !== "student") throw new HttpError(403, "Faqat o'quvchi parolini tiklash mumkin");
+  // Oson o'qiladigan vaqtinchalik parol (0/O, 1/l kabi chalkash belgilarsiz).
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  const password = Array.from(crypto.randomBytes(8), (x) => alphabet[x % alphabet.length]).join("");
+  Object.assign(user, await hashPassword(password), { pwdV: (user.pwdV || 0) + 1, pwdResetAt: new Date().toISOString() });
+  await db().set(userKey(id), user);
+  return json({ password });
 }
 
 async function updateMe(req) {
@@ -1942,6 +1992,7 @@ async function knownColleges() {
 const routes = [
   ["POST", /^auth\/register$/, register],
   ["POST", /^auth\/login$/, login],
+  ["POST", /^auth\/reset$/, resetPassword],
   ["GET", /^me$/, async (req) => json(publicUser(await requireUser(req)))],
   ["PUT", /^me$/, updateMe],
   ["GET", /^health$/, health],
@@ -2033,6 +2084,7 @@ const routes = [
   ["DELETE", /^admin\/surveys\/([\w-]+)\/responses\/([\w-]+)$/, deleteResponse],
   ["GET", /^admin\/students$/, listStudents],
   ["PUT", /^admin\/students\/([\w-]+)$/, updateStudent],
+  ["POST", /^admin\/students\/([\w-]+)\/password$/, adminResetPassword],
   ["GET", /^admin\/trainer-sessions$/, allSessions],
   ["GET", /^admin\/self-study$/, allSelfStudy],
   ["PUT", /^admin\/self-study\/([\w-]+)\/([\w-]+)$/, gradeSelfStudy],

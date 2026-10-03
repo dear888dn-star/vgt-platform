@@ -35,7 +35,7 @@ const b64 = (s) => Buffer.from(s).toString("base64url");
 const sign = (data) => crypto.createHmac("sha256", secret()).update(data).digest("base64url");
 
 export function createToken(user) {
-  const payload = b64(JSON.stringify({ uid: user.id, role: user.role, exp: Date.now() + TOKEN_TTL_MS }));
+  const payload = b64(JSON.stringify({ uid: user.id, role: user.role, pv: user.pwdV || 0, exp: Date.now() + TOKEN_TTL_MS }));
   return `${payload}.${sign(payload)}`;
 }
 
