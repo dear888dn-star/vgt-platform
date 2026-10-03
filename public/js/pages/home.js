@@ -95,6 +95,7 @@ export async function render(el) {
           { class: "row wrap" },
           h("a", { href: "#/topics", class: "btn lg" }, "📚 O'qishni boshlash"),
           h("a", { href: "#/trainer", class: "btn ghost lg" }, "🎙️ Trenajyorni sinash"),
+          h("a", { href: "#/live", class: "btn ghost lg" }, "🎮 Live o'yinga qo'shilish"),
           h("button", { class: "btn ghost lg play-btn", onclick: introVideo }, h("span", { class: "play-ring" }, "▶"), "Platforma haqida video")
         ),
         h(

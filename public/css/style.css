@@ -200,6 +200,7 @@ textarea { resize: vertical; }
 .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
 .badge-ok { background: var(--ok-soft); color: var(--ok); }
 .badge-warn { background: var(--warn-soft); color: var(--warn); }
+.badge-err { background: var(--err-soft); color: var(--err); }
 .lvl-1 { background: var(--ok-soft); color: var(--ok); }
 .lvl-2 { background: var(--warn-soft); color: var(--warn); }
 .lvl-3 { background: var(--err-soft); color: var(--err); }

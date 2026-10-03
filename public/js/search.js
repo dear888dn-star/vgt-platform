@@ -10,6 +10,7 @@ const PAGES = [
   ["📚", "Mavzular", "#/topics"],
   ["🎬", "Mediateka — animatsion darslar, videolar, taqdimotlar", "#/media"],
   ["🧭", "Virtual sayohat — Buyuk ipak yo'li bo'ylab", "#/tour"],
+  ["🎮", "Safar Live — jonli viktorinaga qo'shilish (PIN)", "#/live"],
   ["🎬", "Ekskursiya studiyasi — o'z virtual ekskursiyangizni yarating", "#/studio", true],
   ["🛂", "Safar pasporti — XP, nishonlar, reyting", "#/passport", true],
   ["🔁", "Kunlik takrorlash — tushunchalar kartalari", "#/review"],

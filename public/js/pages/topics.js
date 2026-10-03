@@ -349,9 +349,13 @@ function quizTab(topic) {
       qs[i].querySelectorAll("input").forEach((inp) => (inp.disabled = true));
     });
     const score = Math.round((correct / topic.quiz.length) * 100);
+    const chosen = topic.quiz.map((_, i) => answers[i]);
     updateTopic(topic.id, (s) => {
       s.quiz = Math.max(s.quiz ?? 0, score);
       s.quizAttempts = (s.quizAttempts || 0) + 1;
+      // Test tahlili (item-analiz) uchun: birinchi urinishdagi va oxirgi tanlangan variantlar (asl tartib bo'yicha)
+      if (!Array.isArray(s.quizFirst)) s.quizFirst = chosen;
+      s.quizLast = chosen;
     });
     changed();
     submit.disabled = true;

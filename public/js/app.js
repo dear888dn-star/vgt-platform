@@ -23,6 +23,7 @@ import * as cert from "./pages/cert.js";
 import * as tour from "./pages/tour.js";
 import * as media from "./pages/media.js";
 import * as studio from "./pages/studio.js";
+import * as live from "./pages/live.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -45,6 +46,9 @@ const routes = [
   [/^\/review$/, review.render],
   [/^\/tour$/, tour.render],
   [/^\/media$/, media.render],
+  [/^\/live$/, live.renderJoin],
+  [/^\/live\/play\/(\d{6})$/, live.renderPlay],
+  [/^\/live\/host\/(\d{6})$/, live.renderHost, { teacher: true }],
   [/^\/studio$/, studio.renderList, { auth: true }],
   [/^\/studio\/view\/([\w-]+)$/, studio.renderView],
   [/^\/studio\/([\w-]+)$/, studio.renderEditor, { auth: true }],
@@ -89,6 +93,8 @@ async function route() {
   }
   const path = (location.hash || "#/").slice(1).split("?")[0];
   document.body.classList.remove("nav-open");
+  // Jonli viktorina — to'liq ekranli o'yin rejimi (menyu va pastki panelsiz)
+  document.body.classList.toggle("live-mode", /^\/live(\/|$)/.test(path));
   document.querySelectorAll(".modal-overlay").forEach((m) => m.remove());
   toggle.setAttribute("aria-expanded", "false");
   renderNav();

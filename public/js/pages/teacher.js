@@ -15,6 +15,7 @@ import { audioUrl, audioInfo, chunkText, ttsInfo, resetTtsInfo } from "../narrat
 import { buildScenes } from "../lesson-player.js";
 import { bookParagraphs } from "../audiobook.js";
 import { TOUR } from "./tour.js";
+import { createForm } from "./live.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
@@ -29,6 +30,8 @@ const TABS = [
   ["builder", "🛠 So'rovnoma konstruktori"],
   ["slides", "🖥️ Taqdimotlar"],
   ["videos", "📹 Video darslar"],
+  ["live", "🎮 Jonli viktorina"],
+  ["items", "📉 Test tahlili"],
   ["voices", "🔊 AI ovozlar"],
   ["studio", "🎬 Ekskursiyalar"],
   ["students", "👥 O'quvchilar"],
@@ -45,7 +48,7 @@ export async function render(el, tab = "", param) {
     content
   );
   mount(content, loading());
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   await view(content, param);
@@ -232,6 +235,79 @@ async function slidesManager(el) {
     ),
     h("div", { class: "stack sm-list" }, TOPICS.map(row))
   );
+}
+
+// ---------------- Test tahlili (item-analiz) ----------------
+
+const fmt2 = (v) => (v === null || v === undefined || Number.isNaN(v) ? "—" : v.toFixed(2).replace(".", ","));
+const krText = (v) => (v === null ? "ma'lumot yetarli emas" : v >= 0.8 ? "a'lo" : v >= 0.7 ? "yaxshi" : v >= 0.6 ? "qoniqarli" : "past");
+const dClass = (d) => (d === null ? "" : d < 0 ? "lv-bad" : d < 0.2 ? "lv-warn" : d < 0.3 ? "lv-mid" : "lv-good");
+const dText = (d) => (d === null ? "—" : d < 0 ? "salbiy" : d < 0.2 ? "past" : d < 0.3 ? "qoniqarli" : d < 0.4 ? "yaxshi" : "a'lo");
+const pText = (p) => (p === null ? "—" : p > 0.8 ? "oson" : p < 0.3 ? "qiyin" : "o'rtacha");
+
+async function itemsView(el, topicParam) {
+  let cohort = "all";
+  const box = h("div");
+  const seg = h("div", { class: "segmented" }, [["all", "Barchasi"], ["experimental", "TG"], ["control", "NG"]].map(([k, l]) => h("button", { class: `seg ${k === cohort ? "active" : ""}`, onclick: (e) => {
+    cohort = k;
+    seg.querySelectorAll(".seg").forEach((b) => b.classList.toggle("active", b === e.currentTarget));
+    draw();
+  } }, l)));
+  const method = h("details", { class: "card small" }, h("summary", {}, h("b", {}, "ℹ️ Uslubiyat (klassik test nazariyasi)")),
+    h("ul", {},
+      h("li", {}, h("b", {}, "Qiyinlik indeksi p"), " — savolga to'g'ri javob bergan o'quvchilar ulushi (0,3–0,8 — maqbul)."),
+      h("li", {}, h("b", {}, "Ajrata olish indeksi D"), " = p(yuqori 27%) − p(past 27%); ≥0,4 a'lo, 0,3–0,39 yaxshi, 0,2–0,29 qoniqarli, <0,2 qayta ko'rib chiqish kerak, salbiy — kalitni tekshiring."),
+      h("li", {}, h("b", {}, "r"), " — savol bali va qolgan savollar yig'indisi orasidagi korrelyatsiya (tuzatilgan point-biserial)."),
+      h("li", {}, h("b", {}, "KR-20"), " — testning ichki izchilligi (ishonchliligi): ≥0,7 yaxshi."),
+      h("li", {}, "Faqat ", h("b", {}, "birinchi urinish"), " javoblari olinadi (qayta topshirishlar natijani buzmasligi uchun). Ma'lumot yig'ish ushbu yangilanishdan keyin boshlanadi.")));
+
+  async function draw() {
+    box.replaceChildren(loading());
+    const topicId = topicParam;
+    if (!topicId) {
+      const d = await api.get(`admin/items?cohort=${cohort}`);
+      box.replaceChildren(h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Mavzu"), h("th", {}, "N"), h("th", {}, "O'rtacha"), h("th", {}, "KR-20"), h("th", {}, "Diqqat talab"), h("th", {}))),
+        h("tbody", {}, d.topics.map((t) => h("tr", {},
+          h("td", {}, `${t.num}. ${t.title}`),
+          h("td", {}, t.n),
+          h("td", {}, t.n ? `${Math.round(t.meanPct)}%` : "—"),
+          h("td", {}, t.kr20 === null ? "—" : `${fmt2(t.kr20)} (${krText(t.kr20)})`),
+          h("td", {}, t.critical ? h("span", { class: "badge badge-err" }, `⛔ ${t.critical} kalit?`) : null, " ", t.warn ? h("span", { class: "badge badge-warn" }, `⚠ ${t.warn}`) : t.n && !t.critical ? h("span", { class: "badge badge-ok" }, "✓") : "—"),
+          h("td", {}, h("a", { class: "btn small ghost", href: `#/teacher/items/${t.id}` }, "Batafsil →"))))))));
+      return;
+    }
+    const d = await api.get(`admin/items?topic=${topicId}&cohort=${cohort}`);
+    const maxDist = Math.max(1, ...d.distribution);
+    box.replaceChildren(
+      h("nav", { class: "crumbs" }, h("a", { href: "#/teacher/items" }, "Test tahlili"), " / ", `${d.topic.num}-mavzu`),
+      h("h3", {}, `${d.topic.num}. ${d.topic.title}`),
+      d.n === 0
+        ? h("div", { class: "alert alert-info" }, "Bu mavzu testini hali hech kim (birinchi urinishda) topshirmagan.")
+        : h("div", { class: "stack" },
+            d.n < 10 && h("div", { class: "alert alert-warn" }, `Hozircha ${d.n} ta javob — ishonchli xulosa uchun kamida 20–30 o'quvchi kerak. Ko'rsatkichlar taxminiy.`),
+            h("div", { class: "grid cols-4" },
+              h("div", { class: "card stat-card" }, h("b", {}, d.n), h("span", { class: "muted small" }, "o'quvchi (N)")),
+              h("div", { class: "card stat-card" }, h("b", {}, `${fmt2(d.mean)} / ${d.k}`), h("span", { class: "muted small" }, `o'rtacha ball (${Math.round(d.meanPct)}%), SD = ${fmt2(d.sd)}`)),
+              h("div", { class: "card stat-card" }, h("b", {}, fmt2(d.kr20)), h("span", { class: "muted small" }, `KR-20 ishonchlilik: ${krText(d.kr20)}`)),
+              h("div", { class: "card stat-card" }, h("b", {}, d.items.filter((it) => it.flags.some((f) => f.level === "critical")).length), h("span", { class: "muted small" }, "kalitni tekshirish kerak bo'lgan savol"))),
+            h("div", { class: "card" }, h("h4", {}, "Ballar taqsimoti"), h("div", { class: "ia-hist" }, d.distribution.map((c, sIdx) => h("div", { class: "ia-hcol", title: `${sIdx} ball: ${c} o'quvchi` }, h("span", {}, c || ""), h("i", { style: { "--h": `${(c / maxDist) * 100}%` } }), h("small", {}, sIdx))))),
+            h("div", { class: "card table-wrap" }, h("table", { class: "table ia-table" },
+              h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Savol"), h("th", {}, "Qiyinlik p"), h("th", {}, "Ajratish D"), h("th", {}, "r"), h("th", {}, "Variantlar tanlovi"))),
+              h("tbody", {}, d.items.map((it) => h("tr", { class: it.flags.some((f) => f.level === "critical") ? "ia-critical" : "" },
+                h("td", {}, it.index + 1),
+                h("td", { class: "ia-q" }, h("details", {}, h("summary", {}, it.q.length > 90 ? `${it.q.slice(0, 88)}…` : it.q), h("ol", { type: "A" }, it.options.map((o, oi) => h("li", { class: oi === it.correct ? "ok-text" : "" }, o, oi === it.correct ? " ✓ (kalit)" : "")))),
+                  it.flags.map((f) => h("div", { class: `ia-flag ${f.level}` }, f.level === "critical" ? "⛔ " : f.level === "warn" ? "⚠️ " : "ℹ️ ", f.text))),
+                h("td", {}, h("div", { class: "ia-pbar" }, h("i", { style: { width: `${(it.p || 0) * 100}%` } })), h("small", {}, `${fmt2(it.p)} · ${pText(it.p)}`)),
+                h("td", {}, h("span", { class: `ia-d ${dClass(it.D)}` }, fmt2(it.D)), h("small", { class: "muted" }, ` ${dText(it.D)}`)),
+                h("td", {}, fmt2(it.r)),
+                h("td", {}, h("div", { class: "ia-opts" }, it.counts.map((c, oi) => h("span", { class: `ia-opt ${oi === it.correct ? "key" : ""}`, title: `${"ABCDEF"[oi]}: ${c} ta (${Math.round((c / d.n) * 100)}%)`, style: { flex: `${Math.max(c, 0.4)}` } }, `${"ABCDEF"[oi]}${oi === it.correct ? "✓" : ""} ${c}`))))))))),
+            h("button", { class: "btn ghost", onclick: () => downloadFile(`test-tahlili-${d.topic.id}.csv`, toCSV([["#", "Savol", "p", "D", "r", "Kalit", ...it0(d).map((_, i) => `${"ABCDEF"[i]} soni`), "Izoh"], ...d.items.map((it) => [it.index + 1, it.q, fmt2(it.p), fmt2(it.D), fmt2(it.r), "ABCDEF"[it.correct], ...it.counts, it.flags.map((f) => f.text).join("; ")])])) }, "⬇ CSV"))
+    );
+  }
+  const it0 = (d) => d.items[0]?.options || [];
+  mount(el, h("div", { class: "row between wrap" }, h("p", { class: "muted" }, "Mavzu testlari savollarining sifat tahlili: qiyinlik, ajrata olish qobiliyati, distraktorlar va ishonchlilik. Javob kalitidagi ehtimoliy xatolar avtomatik aniqlanadi."), seg), method, box);
+  draw();
 }
 
 // ---------------- O'quvchilar ekskursiyalari ----------------

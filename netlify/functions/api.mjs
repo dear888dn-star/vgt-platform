@@ -17,6 +17,8 @@ import { demoReply, demoEvaluation } from "../lib/demo.mjs";
 import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagnostics.mjs";
 import { computeGame, certificateStatus } from "../../public/js/gamification.js";
 import { findTopic, tutorSystem, searchAnswer } from "../lib/tutor.mjs";
+import { TOPICS } from "../../public/data/topics.js";
+import { itemAnalysis } from "../lib/itemstats.mjs";
 import { synthesize, ttsEnabled, ttsModels, ttsKey, VOICES, STYLES } from "../lib/tts.mjs";
 import { ROUTE_RUBRIC, ROUTE_LEVELS, routeLevel } from "../lib/route-task.mjs";
 
@@ -1160,6 +1162,219 @@ async function adminTts(req) {
   });
 }
 
+// ---------- Test tahlili (item-analiz) ----------
+
+async function adminItems(req) {
+  await requireTeacher(req);
+  const url = new URL(req.url);
+  const cohort = url.searchParams.get("cohort") || "all";
+  const topicId = url.searchParams.get("topic");
+  const users = (await getMany("user/")).filter((u) => u.role === "student" && (cohort === "all" || (u.cohort || "unassigned") === cohort));
+  const progress = await Promise.all(users.map((u) => db().get(`progress/${u.id}`)));
+  const responsesOf = (t) => progress.map((p) => p?.topics?.[t.id]?.quizFirst).filter((r) => Array.isArray(r) && r.length === t.quiz.length && r.every((x) => Number.isInteger(x)));
+  if (topicId) {
+    const t = TOPICS.find((x) => x.id === topicId);
+    if (!t) throw new HttpError(404, "Mavzu topilmadi");
+    return json({ topic: { id: t.id, num: t.num, title: t.title }, ...itemAnalysis(t.quiz, responsesOf(t)) });
+  }
+  return json({
+    topics: TOPICS.map((t) => {
+      const a = itemAnalysis(t.quiz, responsesOf(t));
+      return { id: t.id, num: t.num, title: t.title, n: a.n, meanPct: a.meanPct, kr20: a.kr20, critical: a.items.filter((it) => it.flags.some((f) => f.level === "critical")).length, warn: a.items.filter((it) => it.flags.some((f) => f.level === "warn")).length };
+    }),
+  });
+}
+
+// ---------- Safar Live: jonli sinf viktorinasi ----------
+// O'yin hujjatiga faqat o'qituvchi yozadi; o'yinchilar va javoblar — alohida yozuvlar (bir vaqtda yozishda
+// bir-birini o'chirmaslik uchun). Reyting javoblar ochilganda hisoblanib, o'yin hujjatiga saqlanadi.
+
+const liveKey = (pin) => `live/${pin}`;
+const livePlayerKey = (pin, pid) => `liveplayer/${pin}/${pid}`;
+const liveAnsKey = (pin, pid, q) => `liveans/${pin}/${pid}/${q}`;
+const AVATARS = ["🐪", "🦁", "🐯", "🦅", "🐬", "🦊", "🐼", "🐸", "🦉", "🐝", "🦄", "🐢", "🐧", "🐨", "🦋", "🐙"];
+const liveCache = new Map(); // o'zgarmas yozuvlar (o'yinchi, javob) keshi
+
+async function cachedDoc(key) {
+  if (liveCache.has(key)) return liveCache.get(key);
+  const d = await db().get(key);
+  if (d) liveCache.set(key, d);
+  if (liveCache.size > 5000) liveCache.clear();
+  return d;
+}
+
+function shuffle(a) {
+  const x = [...a];
+  for (let i = x.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [x[i], x[j]] = [x[j], x[i]];
+  }
+  return x;
+}
+
+async function loadGame(pin) {
+  if (!/^\d{6}$/.test(pin)) throw new HttpError(404, "O'yin topilmadi");
+  const g = await db().get(liveKey(pin));
+  if (!g || Date.now() - Date.parse(g.createdAt) > 24 * 3600_000) throw new HttpError(404, "Bunday PIN bilan o'yin topilmadi");
+  return g;
+}
+
+const timeLeftOf = (g) => (g.state === "question" ? Math.max(0, g.duration * 1000 - (Date.now() - Date.parse(g.qStartedAt))) : 0);
+
+async function liveCreate(req) {
+  const teacher = await requireTeacher(req);
+  const b = await body(req);
+  const ids = Array.isArray(b.topicIds) && b.topicIds.length ? b.topicIds : TOPICS.map((t) => t.id);
+  const pool = TOPICS.filter((t) => ids.includes(t.id)).flatMap((t) => t.quiz.map((q) => ({ ...q, topic: t.num })));
+  if (!pool.length) throw new HttpError(400, "Tanlangan mavzularda test savollari yo'q");
+  const count = Math.max(3, Math.min(30, Number(b.count) || 10));
+  const questions = shuffle(pool)
+    .slice(0, count)
+    .map((q) => {
+      const order = shuffle(q.options.map((_, i) => i)).slice(0, 4);
+      if (!order.includes(q.correct)) order[0] = q.correct;
+      const opts = shuffle(order);
+      return { q: q.q, options: opts.map((i) => q.options[i]), correct: opts.indexOf(q.correct), topic: q.topic };
+    });
+  let pin;
+  for (let i = 0; i < 20; i++) {
+    pin = String(Math.floor(100000 + Math.random() * 900000));
+    if (!(await db().get(liveKey(pin)))) break;
+  }
+  const game = {
+    pin, hostId: teacher.id, hostName: teacher.name,
+    title: str(b.title, 100) || "Safar Live viktorinasi",
+    duration: Math.max(10, Math.min(90, Number(b.duration) || 20)),
+    readAloud: Boolean(b.readAloud),
+    questions, state: "lobby", qIndex: -1, qStartedAt: null, board: {}, dist: null, prevRanks: {},
+    createdAt: new Date().toISOString(),
+  };
+  await db().set(liveKey(pin), game);
+  return json({ pin }, 201);
+}
+
+async function livePlayers(pin) {
+  const keys = await db().list(`liveplayer/${pin}/`);
+  return (await Promise.all(keys.map(cachedDoc))).filter(Boolean).map(({ key, ...p }) => p);
+}
+
+async function liveHost(req, pin) {
+  const user = await requireTeacher(req);
+  const g = await loadGame(pin);
+  if (g.hostId !== user.id) throw new HttpError(403, "Bu o'yin sizga tegishli emas");
+  const players = await livePlayers(pin);
+  let answered = 0;
+  if (g.state === "question") answered = (await db().list(`liveans/${pin}/`)).filter((k) => k.endsWith(`/${g.qIndex}`)).length;
+  return json({ ...g, players, answered, timeLeft: timeLeftOf(g), serverNow: Date.now() });
+}
+
+async function liveControl(req, pin) {
+  const user = await requireTeacher(req);
+  const g = await loadGame(pin);
+  if (g.hostId !== user.id) throw new HttpError(403, "Bu o'yin sizga tegishli emas");
+  const { action } = await body(req);
+  if (action === "start" || action === "next") {
+    if (g.state === "question") throw new HttpError(409, "Avval javoblarni oching");
+    const nextQ = g.qIndex + 1;
+    if (nextQ >= g.questions.length) g.state = "final";
+    else Object.assign(g, { state: "question", qIndex: nextQ, qStartedAt: new Date().toISOString(), dist: null });
+  } else if (action === "reveal") {
+    if (g.state !== "question") return json(g);
+    const players = await livePlayers(pin);
+    const answers = (await Promise.all(players.map((p) => cachedDoc(liveAnsKey(pin, p.pid, g.qIndex))))).filter(Boolean);
+    const dist = g.questions[g.qIndex].options.map(() => 0);
+    const ranked = (b) => Object.entries(b).sort((a, c) => c[1].total - a[1].total).map(([pid], i) => [pid, i + 1]);
+    g.prevRanks = Object.fromEntries(ranked(g.board));
+    for (const p of players) {
+      const prev = g.board[p.pid] || { name: p.name, avatar: p.avatar, total: 0, correct: 0, streak: 0 };
+      const a = answers.find((x) => x.pid === p.pid);
+      if (a) dist[a.choice] = (dist[a.choice] || 0) + 1;
+      g.board[p.pid] = {
+        name: p.name, avatar: p.avatar,
+        total: prev.total + (a?.points || 0),
+        last: a?.points || 0,
+        correct: prev.correct + (a?.correct ? 1 : 0),
+        streak: a?.correct ? prev.streak + 1 : 0,
+        choice: a ? a.choice : null,
+      };
+    }
+    Object.assign(g, { state: "reveal", dist });
+  } else if (action === "end") {
+    g.state = "final";
+  } else throw new HttpError(400, "Noma'lum amal");
+  await db().set(liveKey(pin), g);
+  return json({ ok: true, state: g.state, qIndex: g.qIndex });
+}
+
+async function liveJoin(req, pin) {
+  const g = await loadGame(pin);
+  if (g.state === "final") throw new HttpError(409, "O'yin allaqachon tugagan");
+  const b = await body(req);
+  const name = str(b.name, 24).replace(/\s+/g, " ").trim();
+  if (name.length < 2) throw new HttpError(400, "Ismingizni kiriting");
+  const players = await livePlayers(pin);
+  if (players.length >= 120) throw new HttpError(409, "O'yinda joy qolmadi");
+  if (players.some((p) => p.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, "Bu ism band — boshqasini tanlang");
+  const pid = newId().slice(0, 12);
+  const key = crypto.randomBytes(12).toString("hex");
+  await db().set(livePlayerKey(pin, pid), { pid, key, name, avatar: AVATARS.includes(b.avatar) ? b.avatar : AVATARS[players.length % AVATARS.length], joinedAt: new Date().toISOString() });
+  return json({ pid, key, title: g.title }, 201);
+}
+
+async function livePlayer(pin, pid, key) {
+  const p = await cachedDoc(livePlayerKey(pin, pid));
+  if (!p || p.key !== key) throw new HttpError(403, "O'yinchi topilmadi — qaytadan qo'shiling");
+  return p;
+}
+
+async function liveAnswer(req, pin) {
+  const b = await body(req);
+  const g = await loadGame(pin);
+  const p = await livePlayer(pin, str(b.pid, 40), str(b.key, 60));
+  const q = Number(b.q);
+  if (g.state !== "question" || q !== g.qIndex) throw new HttpError(409, "Bu savol uchun vaqt tugagan");
+  const elapsed = Date.now() - Date.parse(g.qStartedAt);
+  if (elapsed > g.duration * 1000 + 1500) throw new HttpError(409, "Vaqt tugadi");
+  if (await db().get(liveAnsKey(pin, p.pid, q))) throw new HttpError(409, "Javob allaqachon qabul qilingan");
+  const choice = Number(b.choice);
+  if (!Number.isInteger(choice) || choice < 0 || choice >= g.questions[q].options.length) throw new HttpError(400, "Variant noto'g'ri");
+  const correct = choice === g.questions[q].correct;
+  // Ball: to'g'ri javob 500 + tezlik uchun 500 gacha + seriya bonusi (ketma-ket to'g'ri javoblar)
+  const prevStreak = g.board[p.pid]?.streak || 0;
+  const speed = Math.max(0, 1 - elapsed / (g.duration * 1000));
+  const points = correct ? Math.round(500 + 500 * speed + Math.min(prevStreak, 3) * 100) : 0;
+  const ans = { pid: p.pid, q, choice, correct, points, ms: elapsed, at: new Date().toISOString() };
+  await db().set(liveAnsKey(pin, p.pid, q), ans);
+  return json({ ok: true });
+}
+
+async function livePlay(req, pin) {
+  const url = new URL(req.url);
+  const g = await loadGame(pin);
+  const p = await livePlayer(pin, url.searchParams.get("pid") || "", url.searchParams.get("key") || "");
+  const out = { title: g.title, state: g.state, qIndex: g.qIndex, total: g.questions.length, me: { name: p.name, avatar: p.avatar }, duration: g.duration };
+  const ranks = Object.entries(g.board).sort((a, b) => b[1].total - a[1].total);
+  const rankOf = (pid) => ranks.findIndex(([x]) => x === pid) + 1;
+  if (g.state === "question") {
+    const cur = g.questions[g.qIndex];
+    out.question = { q: cur.q, options: cur.options };
+    out.timeLeft = timeLeftOf(g);
+    out.answered = Boolean(await db().get(liveAnsKey(pin, p.pid, g.qIndex)));
+  }
+  if (g.state === "reveal" || g.state === "final") {
+    const b2 = g.board[p.pid] || { total: 0, last: 0, streak: 0, correct: 0, choice: null };
+    out.result = { total: b2.total, last: b2.last, streak: b2.streak, correctCount: b2.correct, rank: rankOf(p.pid) || ranks.length + 1, players: Math.max(ranks.length, 1) };
+    if (g.state === "reveal") {
+      const cur = g.questions[g.qIndex];
+      out.question = { q: cur.q, options: cur.options };
+      out.result.correctOption = cur.correct;
+      out.result.myChoice = b2.choice;
+    }
+    if (g.state === "final") out.podium = ranks.slice(0, 3).map(([, v]) => ({ name: v.name, avatar: v.avatar, total: v.total }));
+  }
+  return json(out);
+}
+
 // ---------- Ekskursiya studiyasi (o'quvchi yaratgan virtual ekskursiyalar) ----------
 
 const LANDMARK_KEYS = new Set(["registan", "khiva", "bukhara", "shahizinda", "aksaray", "guramir", "tashkent"]);
@@ -1785,6 +2000,13 @@ const routes = [
 
   ["GET", /^evidence$/, myEvidence],
   ["GET", /^leaderboard$/, leaderboard],
+  ["GET", /^admin\/items$/, adminItems],
+  ["POST", /^live$/, liveCreate],
+  ["GET", /^live\/(\d{6})\/host$/, liveHost],
+  ["POST", /^live\/(\d{6})\/control$/, liveControl],
+  ["POST", /^live\/(\d{6})\/join$/, liveJoin],
+  ["POST", /^live\/(\d{6})\/answer$/, liveAnswer],
+  ["GET", /^live\/(\d{6})\/play$/, livePlay],
   ["GET", /^studio$/, myStudio],
   ["POST", /^studio$/, createStudio],
   ["GET", /^studio\/view\/([\w-]+)$/, viewStudio],
