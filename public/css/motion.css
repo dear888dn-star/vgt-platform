@@ -440,3 +440,18 @@ a.feature:hover .feature-icon { transform: rotate(-8deg) scale(1.12); }
 .voice-start { border-color: var(--accent); }
 @media (max-width: 640px) { .voice-stage { grid-template-columns: 1fr; justify-items: center; text-align: center; } .vo-controls { justify-content: center; } }
 @media (prefers-reduced-motion: reduce) { .voice-stage::before { animation: none; } }
+
+/* Tadqiqot arxivi bilan birlashtirish: manba tanlash va TG/NG taqqoslash */
+.rb-source .row { gap: 8px; align-items: center; }
+.rb-archive-badge { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 99px; background: var(--accent-soft); color: var(--text); font-size: 0.8rem; font-weight: 600; }
+.rb-cmp { margin-top: 16px; }
+.rb-cmp-stage { padding: 12px 0; border-top: 1px dashed var(--border); }
+.rb-cmp-stage:first-of-type { border-top: 0; }
+.rb-cmp-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-weight: 700; font-size: 0.9rem; margin-bottom: 8px; }
+.rb-cmp-head .rb-dot { margin-right: 6px; }
+.rb-cmp-stat { font-weight: 600; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rb-cmp-stat.sig { color: var(--ok); }
+.rb-cmp-line { display: grid; grid-template-columns: 34px 1fr 110px; gap: 10px; align-items: center; margin: 4px 0; font-size: 0.85rem; }
+.rb-cmp-mean { font-variant-numeric: tabular-nums; font-weight: 700; }
+.rb-cmp-mean small { font-weight: 400; color: var(--muted); }
+@media (max-width: 640px) { .rb-cmp-line { grid-template-columns: 30px 1fr; } .rb-cmp-mean { grid-column: 2; font-size: 0.78rem; } }

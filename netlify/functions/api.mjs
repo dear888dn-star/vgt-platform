@@ -18,6 +18,7 @@ import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagn
 import { computeGame, certificateStatus } from "../../public/js/gamification.js";
 import { findTopic, tutorSystem, searchAnswer } from "../lib/tutor.mjs";
 import { TOPICS } from "../../public/data/topics.js";
+import { ARCHIVE } from "../../public/data/research-archive.js";
 import { itemAnalysis } from "../lib/itemstats.mjs";
 import { synthesize, ttsEnabled, ttsModels, ttsKey, VOICES, STYLES } from "../lib/tts.mjs";
 import { ROUTE_RUBRIC, ROUTE_LEVELS, routeLevel } from "../lib/route-task.mjs";
@@ -2027,10 +2028,12 @@ async function publicSnapshot() {
     return g;
   };
   const byId = new Map();
+  const cohortOf = new Map();
   for (const u of students) {
     const g = groupOf(u);
     g.students++;
     byId.set(u.id, g);
+    cohortOf.set(u.id, u.cohort || "unassigned");
   }
   for (const r of records) byId.get(r.userId)?.recs.push(r);
 
@@ -2042,7 +2045,17 @@ async function publicSnapshot() {
         const complete = list.filter((x) => Number.isFinite(x.B));
         const levels = { Past: 0, "O'rta": 0, Yuqori: 0 };
         for (const x of complete) levels[x.level]++;
-        return [st, { n: list.length, complete: complete.length, B: round2(mean(pick("B"))), M: round2(mean(pick("Mavg"))), T: round2(mean(pick("Tpct"))), levels }];
+        // TG / NG kesimida: darajalar [Past, O'rta, Yuqori] va B yig'indisi — tadqiqot arxivi bilan birlashtirish uchun.
+        const cohorts = {};
+        for (const r of recs.filter((r) => r.stage === st)) {
+          const res = r.result || computeResult(r);
+          if (!Number.isFinite(res.B)) continue;
+          const c = (cohorts[cohortOf.get(r.userId) || "unassigned"] ||= { levels: [0, 0, 0], Bsum: 0, n: 0 });
+          c.levels[res.B >= 4.5 ? 2 : res.B >= 3.5 ? 1 : 0]++;
+          c.Bsum = round2(c.Bsum + res.B);
+          c.n++;
+        }
+        return [st, { n: list.length, complete: complete.length, B: round2(mean(pick("B"))), M: round2(mean(pick("Mavg"))), T: round2(mean(pick("Tpct"))), levels, cohorts }];
       })
     );
 
@@ -2061,9 +2074,11 @@ async function publicSnapshot() {
 
 async function knownColleges() {
   try {
-    return (await publicSnapshot()).colleges.filter((c) => c.name !== "Muassasa ko'rsatilmagan").map((c) => c.name).slice(0, 50);
+    // Tadqiqot arxividagi texnikumlar birinchi — yangi o'quvchilar nomni bir xil yozsa, natijalar arxiv bilan birlashadi.
+    const names = [...ARCHIVE.colleges.map((c) => c.name), ...(await publicSnapshot()).colleges.filter((c) => c.name !== "Muassasa ko'rsatilmagan").map((c) => c.name)];
+    return [...new Map(names.map((n) => [normCollege(n), n])).values()].slice(0, 50);
   } catch {
-    return [];
+    return ARCHIVE.colleges.map((c) => c.name);
   }
 }
 

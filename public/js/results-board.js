@@ -3,11 +3,13 @@
 import { h } from "./ui.js";
 import { api } from "./api.js";
 import { reducedMotion, enhance } from "./motion.js";
+import { ARCHIVE, ARCHIVE_LEVELS, codesFrom, levelMean, archiveCollegeOf, addLevels } from "../data/research-archive.js";
+import { welchT, chiSquare } from "./stats.js";
 
 const STAGE_KEYS = ["T0", "T1", "T2"];
 const STAGE_LABEL = { T0: "Boshlang'ich (T0)", T1: "Oraliq (T1)", T2: "Yakuniy (T2)" };
 const METRICS = {
-  B: { label: "Integral ko'rsatkich (B)", short: "B", max: 5, ticks: [0, 1, 2, 3, 4, 5], fmt: (v) => v.toFixed(2).replace(".", ","), hint: "B = (M + KK + AR) / 3, 3–5 ballik shkala. Faqat to'liq baholangan o'quvchilar." },
+  B: { label: "Integral ko'rsatkich (B)", short: "B", max: 5, ticks: [0, 1, 2, 3, 4, 5], fmt: (v) => v.toFixed(2).replace(".", ","), hint: "B = (M + KK + AR) / 3, 3–5 ballik shkala. Birlashgan va arxiv ko'rinishida — daraja kodlari (past 3, o'rta 4, yuqori 5) bo'yicha o'rtacha, dissertatsiya metodikasiga mos." },
   M: { label: "Motivatsiya (anketa, M)", short: "M", max: 5, ticks: [0, 1, 2, 3, 4, 5], fmt: (v) => v.toFixed(2).replace(".", ","), hint: "A-bo'lim anketasi: 15 fikr bo'yicha o'rtacha ball (1–5)." },
   T: { label: "Bilim testi (T, %)", short: "T", max: 100, ticks: [0, 25, 50, 75, 100], fmt: (v) => `${Math.round(v)}%`, hint: "B-bo'lim testi: to'g'ri javoblar ulushi." },
 };
@@ -17,7 +19,81 @@ const LEVELS = [
   ["Yuqori", "lv-high"],
 ];
 
-let state = { data: null, metric: "B", focus: null, loadedAt: 0 };
+let state = { data: null, metric: "B", focus: null, loadedAt: 0, source: "all", cohort: "all" };
+const SOURCES = { all: "Birlashgan", archive: "Tajriba-sinov 2024–2026", platform: "Platforma (yangi)" };
+const COHORT_LABEL = { all: "Barchasi", experimental: "TG", control: "NG" };
+
+// ---------- Arxiv (dissertatsiya) + platforma ma'lumotlarini yagona ko'rinishga keltirish ----------
+const toArr = (lv) => (Array.isArray(lv) ? lv : ARCHIVE_LEVELS.map((k) => lv?.[k] || 0));
+const sumArr = (a) => a.reduce((x, y) => x + y, 0);
+
+/** Platforma bosqichi: tanlangan guruh (TG/NG/barchasi) bo'yicha darajalar, B yig'indisi, M, T. */
+function platformPart(st, cohort) {
+  if (!st) return null;
+  if (cohort === "all") return { levels: toArr(st.levels), Bsum: Number.isFinite(st.B) ? st.B * st.complete : 0, n: st.complete || 0, total: st.n || 0, M: st.M, T: st.T };
+  const c = st.cohorts?.[cohort];
+  return c ? { levels: c.levels, Bsum: c.Bsum, n: c.n, total: c.n, M: null, T: null } : null;
+}
+/** Arxiv bosqichi: to'liq darajalar yoki (T1 texnikumlar) faqat yuqori daraja soni. */
+function archivePart(levels, cohort) {
+  if (!levels) return null;
+  const pick = (g) => levels[g];
+  const parts = cohort === "all" ? [pick("experimental"), pick("control")] : [pick(cohort)];
+  if (parts.some((x) => !Array.isArray(x))) return { partialHigh: parts.reduce((s, x) => s + (x?.Yuqori || 0), 0) };
+  const lv = addLevels(...parts);
+  return { levels: lv, n: sumArr(lv) };
+}
+function mergeStage(arch, plat, source) {
+  const useA = source !== "platform" && arch;
+  const useP = source !== "archive" && plat && plat.total > 0;
+  if (useA && arch.partialHigh != null) {
+    return { n: arch.partialHigh, complete: 0, levels: {}, partialHigh: arch.partialHigh, B: null, M: null, T: null };
+  }
+  const levels = addLevels(useA ? arch.levels : null, useP ? plat.levels : null);
+  const complete = sumArr(levels);
+  // Birlashgan va arxiv rejimida B — daraja kodlari (3/4/5) bo'yicha (dissertatsiya metodikasi); platformada — haqiqiy B.
+  const B = source === "platform" ? (plat?.n ? plat.Bsum / plat.n : null) : levelMean(levels);
+  return {
+    n: (useA ? arch.n : 0) + (useP ? plat.total : 0),
+    complete,
+    levels: Object.fromEntries(ARCHIVE_LEVELS.map((k, i) => [k, levels[i]])),
+    levelsArr: levels,
+    B: Number.isFinite(B) ? B : null,
+    M: useP ? plat.M : null,
+    T: useP ? plat.T : null,
+  };
+}
+function buildView(d, source, cohort) {
+  const rows = new Map();
+  const row = (name) => {
+    if (!rows.has(name)) rows.set(name, { name, students: 0, arch: null, plat: [] });
+    return rows.get(name);
+  };
+  if (source !== "platform") for (const a of ARCHIVE.colleges) row(a.name).arch = a;
+  if (source !== "archive") for (const c of d?.colleges || []) {
+    const a = archiveCollegeOf(c.name);
+    const r = row(a && source !== "platform" ? a.name : c.name);
+    r.plat.push(c);
+  }
+  const nOf = (n) => (cohort === "all" ? n.experimental + n.control : n[cohort]);
+  const stages = (arch, plats) => Object.fromEntries(STAGE_KEYS.map((s) => {
+    const parts = plats.map((p) => platformPart(p.stages[s], cohort)).filter(Boolean);
+    const plat = parts.length ? { levels: addLevels(...parts.map((p) => p.levels)), Bsum: parts.reduce((x, p) => x + p.Bsum, 0), n: parts.reduce((x, p) => x + p.n, 0), total: parts.reduce((x, p) => x + p.total, 0), M: parts.length === 1 ? parts[0].M : null, T: parts.length === 1 ? parts[0].T : null } : null;
+    return [s, mergeStage(arch ? archivePart(arch.levels[s], cohort) : null, plat, source)];
+  }));
+  const colleges = [...rows.values()].map((r) => ({
+    name: r.name,
+    students: (r.arch && source !== "platform" ? nOf(r.arch.n) : 0) + (source !== "archive" ? r.plat.reduce((x, c) => x + c.students, 0) : 0),
+    archive: Boolean(r.arch && source !== "platform"),
+    stages: stages(r.arch, r.plat),
+  })).sort((a, b) => b.students - a.students);
+  const total = {
+    name: "Barcha texnikumlar",
+    students: (source !== "platform" ? nOf(ARCHIVE.total.n) : 0) + (source !== "archive" ? d?.total.students || 0 : 0),
+    stages: stages(source !== "platform" ? ARCHIVE.total : null, source !== "archive" && d ? [d.total] : []),
+  };
+  return { updatedAt: d?.updatedAt || new Date().toISOString(), colleges, total };
+}
 let root;
 let tip;
 
@@ -49,11 +125,11 @@ function hasValue(stage, metric) {
 }
 
 function render() {
-  const d = state.data;
-  if (!d) {
-    root.replaceChildren(h("div", { class: "container rb-inner" }, header(null), h("p", { class: "muted" }, "Natijalarni yuklab bo'lmadi.")));
+  if (!state.data && state.source === "platform") {
+    root.replaceChildren(h("div", { class: "container rb-inner" }, header(null), sourceBar(), h("p", { class: "muted" }, "Natijalarni yuklab bo'lmadi.")));
     return;
   }
+  const d = buildView(state.data, state.source, state.cohort);
   const metric = METRICS[state.metric];
   const rows = d.colleges.filter((c) => STAGE_KEYS.some((s) => hasValue(c.stages[s], state.metric)));
   const focus = d.colleges.find((c) => c.name === state.focus) || d.total;
@@ -63,6 +139,7 @@ function render() {
       "div",
       { class: "container rb-inner" },
       header(d),
+      sourceBar(),
       tiles(d),
       h(
         "div",
@@ -89,6 +166,7 @@ function render() {
           levelChart(focus)
         )
       ),
+      cohortCard(),
       tableView(d)
     )
   );
@@ -102,7 +180,7 @@ function header(d) {
     { class: "rb-head" },
     h("span", { class: "eyebrow" }, "Ochiq monitoring"),
     h("h2", {}, "Texnikumlar kesimida diagnostika natijalari"),
-    h("p", { class: "muted" }, "Kompleks diagnostikaning boshlang'ich, oraliq va yakuniy bosqichlari bo'yicha umumlashtirilgan natijalar. Shaxsiy ma'lumotlar ko'rsatilmaydi.", d && h("span", { class: "rb-updated" }, ` Yangilangan: ${new Date(d.updatedAt).toLocaleString("uz-UZ", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}`))
+    h("p", { class: "muted" }, "Kompleks diagnostikaning boshlang'ich, oraliq va yakuniy bosqichlari bo'yicha umumlashtirilgan natijalar. 2024–2026-yillardagi tajriba-sinov natijalari (dissertatsiya, III bob) platformadagi yangi diagnostikalar bilan yagona mezon — B indeksi darajalari bo'yicha birlashtiriladi. Shaxsiy ma'lumotlar ko'rsatilmaydi.", d && state.source !== "archive" && h("span", { class: "rb-updated" }, ` Yangilangan: ${new Date(d.updatedAt).toLocaleString("uz-UZ", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}`))
   );
 }
 
@@ -120,6 +198,46 @@ function tiles(d) {
     STAGE_KEYS.map((s) => tile(h("b", { "data-count": t[s]?.n || 0 }, "0"), `${STAGE_LABEL[s]} ishtirokchisi`, h("i", { class: `rb-dot st-${s}`, "aria-hidden": "true" }))),
     tile(h("b", {}, delta == null ? "—" : `${delta >= 0 ? "+" : "−"}${Math.abs(delta).toFixed(2).replace(".", ",")}`), "B ko'rsatkichi o'sishi (T0 → T2)")
   );
+}
+
+function sourceBar() {
+  const seg = (obj, key, aria) => h("div", { class: "segmented", role: "tablist", "aria-label": aria },
+    Object.entries(obj).map(([k, label]) => h("button", { class: `seg ${state[key] === k ? "active" : ""}`, role: "tab", "aria-selected": String(state[key] === k), onclick: () => { state[key] = k; state.focus = null; render(); } }, label)));
+  return h("div", { class: "rb-filters rb-source" },
+    h("div", { class: "row wrap" }, h("span", { class: "muted small" }, "Manba:"), seg(SOURCES, "source", "Ma'lumotlar manbai"), h("span", { class: "muted small" }, "Guruh:"), seg(COHORT_LABEL, "cohort", "Tadqiqot guruhi")),
+    state.source !== "platform" ? h("span", { class: "rb-archive-badge", title: ARCHIVE.design }, `📚 ${ARCHIVE.source} · n = ${ARCHIVE.total.n.experimental + ARCHIVE.total.n.control}`) : null);
+}
+
+/** TG va NG taqqoslash: har bir bosqichda darajalar, o'rtacha B va Styudent / χ² mezonlari. */
+function cohortCard() {
+  const tg = buildView(state.data, state.source, "experimental").total.stages;
+  const ng = buildView(state.data, state.source, "control").total.stages;
+  const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2).replace(".", ",") : "—");
+  const fp = (p) => (!Number.isFinite(p) ? "—" : p < 0.001 ? "p < 0,001" : `p = ${p.toFixed(3).replace(".", ",")}`);
+  const rows = STAGE_KEYS.map((s) => {
+    const a = tg[s], b = ng[s];
+    if (!a?.complete || !b?.complete) return null;
+    const t = welchT(codesFrom(a.levelsArr), codesFrom(b.levelsArr));
+    const chi = chiSquare([a.levelsArr, b.levelsArr]);
+    const sig = t && t.p < 0.05;
+    const bar = (st, label) => h("div", { class: "rb-cmp-line" }, h("b", {}, label),
+      h("div", { class: "rb-stack" }, LEVELS.map(([lv, cls]) => {
+        const n = st.levels[lv] || 0;
+        const pct = (n / st.complete) * 100;
+        return n > 0 && h("div", { class: `rb-seg ${cls}`, style: { "--w": `${pct}%` }, tabindex: "0", "aria-label": `${label}, ${lv}: ${n} (${Math.round(pct)}%)`, onpointerenter: (e) => showTip(e, [`${label} — ${STAGE_LABEL[s]}`, `${lv} daraja`, `${n} nafar · ${pct.toFixed(1).replace(".", ",")}%`]), onpointermove: moveTip, onpointerleave: hideTip }, pct >= 12 ? `${Math.round(pct)}%` : "");
+      })),
+      h("span", { class: "rb-cmp-mean" }, `x̄ = ${f2(st.B)}`, h("small", {}, ` n=${st.complete}`)));
+    return h("div", { class: "rb-cmp-stage" },
+      h("div", { class: "rb-cmp-head" }, h("span", {}, h("i", { class: `rb-dot st-${s}` }), STAGE_LABEL[s]),
+        t ? h("span", { class: `rb-cmp-stat ${sig ? "sig" : ""}` }, `t = ${f2(t.t)}; ${fp(t.p)}; d = ${f2(t.d)}${chi ? `; χ² = ${f2(chi.chi2)}` : ""}`, sig ? " ✓" : "") : null),
+      bar(a, "TG"), bar(b, "NG"));
+  }).filter(Boolean);
+  if (!rows.length) return null;
+  return h("div", { class: "rb-card rb-cmp" },
+    h("h3", {}, "Tajriba (TG) va nazorat (NG) guruhlari: B indeksi darajalari"),
+    h("p", { class: "muted small" }, "Welch t-mezoni, Koen d va Pirson χ² — daraja kodlari (3, 4, 5) bo'yicha. ✓ — farq statistik ahamiyatli (p < 0,05)."),
+    rows,
+    h("div", { class: "rb-legend levels" }, LEVELS.map(([lv, cls]) => h("span", {}, h("i", { class: `rb-swatch ${cls}` }), `${lv} daraja`))));
 }
 
 function legend() {
@@ -179,6 +297,9 @@ function levelChart(c) {
     STAGE_KEYS.map((s) => {
       const st = c.stages[s] || { levels: {}, complete: 0 };
       const total = st.complete || 0;
+      if (st.partialHigh != null) {
+        return h("div", { class: "rb-level-row" }, h("span", { class: "rb-level-stage" }, h("i", { class: `rb-dot st-${s}` }), STAGE_LABEL[s]), h("div", { class: "rb-stack empty" }, `Oraliq monitoring: yuqori daraja — ${st.partialHigh} nafar (to'liq taqsimot e'lon qilinmagan)`), h("span", { class: "rb-level-n" }, ""));
+      }
       return h(
         "div",
         { class: "rb-level-row" },
@@ -275,5 +396,5 @@ function animateIn() {
     },
     { threshold: 0.15 }
   );
-  root.querySelectorAll(".rb-bars, .rb-levels").forEach((n) => io.observe(n));
+  root.querySelectorAll(".rb-bars, .rb-levels, .rb-cmp").forEach((n) => io.observe(n));
 }

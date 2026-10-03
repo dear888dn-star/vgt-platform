@@ -16,6 +16,7 @@ import { buildScenes } from "../lesson-player.js";
 import { bookParagraphs } from "../audiobook.js";
 import { TOUR } from "./tour.js";
 import { createForm } from "./live.js";
+import { ARCHIVE, ARCHIVE_LEVELS, codesFrom, levelMean, levelIndexOfB, addLevels } from "../../data/research-archive.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
@@ -28,6 +29,7 @@ const GROUPS = [
   ["live", "🎮 Interaktiv dars", 280],
 ];
 const SECTIONS = [
+  { key: "archive", icon: "📚", title: "Tadqiqot arxivi", group: "research", desc: "2024–2026 tajriba-sinov natijalari (dissertatsiya III bob, n = 213) va yangi diagnostikalar bilan birlashtirilgan tahlil.", meta: () => "3 texnikum · TG 106 · NG 107" },
   { key: "diagnostics", icon: "🧪", title: "Kompleks diagnostika", group: "research", desc: "T0–T2 bosqichlari, anketa, test, amaliy topshiriqlar va rubrika bo'yicha baholash.", badge: (o) => o.diag.toGrade && [`${o.diag.toGrade} ta baholash kutmoqda`, "warn"], meta: (o) => `${o.diag.complete} ta to'liq varaqa · faol: ${o.diag.activeStage || "yo'q"}` },
   { key: "experiment", icon: "📐", title: "So'rovnomalar tahlili", group: "research", desc: "TG/NG taqqoslash: t-mezon, χ², Koen d, samaradorlik koeffitsiyenti η." },
   { key: "results", icon: "📈", title: "So'rovnoma natijalari", group: "research", desc: "Savollar bo'yicha taqsimot, M ± SD, darajalar, filtrlar va CSV.", meta: (o) => `${o.responses} ta javob · ${o.surveys} ta so'rovnoma` },
@@ -61,7 +63,7 @@ const sectionHref = (key) => `#/teacher/${key}`;
 
 export async function render(el, tab = "", param) {
   const content = h("div");
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   const sec = SECTIONS.find((x) => x.key === tab);
@@ -1607,9 +1609,11 @@ function diagAnalysis(records, ins, f) {
   const pre = h("select", {}, stages.map((s) => h("option", { value: s, selected: s === "T0" }, ins.stages[s])));
   const post = h("select", {}, stages.map((s) => h("option", { value: s, selected: s === "T2" }, ins.stages[s])));
   const box = h("div", { class: "stack" });
-  const run = () => box.replaceChildren(diagReport(complete, pre.value, post.value, ins));
+  const withArchive = h("input", { type: "checkbox" });
+  const run = () => box.replaceChildren(diagReport(complete, pre.value, post.value, ins, withArchive.checked));
   pre.addEventListener("change", run);
   post.addEventListener("change", run);
+  withArchive.addEventListener("change", run);
   run();
   return h(
     "div",
@@ -1617,11 +1621,13 @@ function diagAnalysis(records, ins, f) {
     h("h2", {}, "Tajriba-sinov natijalari tahlili (TG va NG)"),
     h("p", { class: "small muted" }, "Faqat barcha bo'limlari baholangan (to'liq) diagnostika varaqalari hisobga olinadi. Mezonlar bo'yicha 3 — past, 4 — o'rta, 5 — yuqori; umumiy B: 3,00–3,49 past, 3,50–4,49 o'rta, 4,50–5,00 yuqori."),
     h("div", { class: "grid cols-2" }, h("label", { class: "field" }, h("span", {}, "Boshlang'ich bosqich"), pre), h("label", { class: "field" }, h("span", {}, "Yakuniy bosqich"), post)),
+    h("label", { class: "check-row" }, withArchive, " 📚 2024–2026 tajriba-sinov arxivini qo'shish (dissertatsiya III bobi, n = 213) — B indeksi darajalari bo'yicha"),
     box
   );
 }
 
-function diagReport(complete, preSt, postSt, ins) {
+function diagReport(complete, preSt, postSt, ins, withArchive = false) {
+  if (withArchive) return diagArchiveReport(complete, preSt, postSt);
   if (!complete.length) return emptyState("📊", "To'liq diagnostika varaqalari hali yo'q", "O'quvchilar barcha bo'limlarni topshirib, siz C va D bo'limlarini baholaganingizdan keyin tahlil shu yerda paydo bo'ladi.");
   const groups = ["experimental", "control"];
   const sel = (st, g) => complete.filter((r) => r.stage === st && (r.user?.cohort || "unassigned") === g);
@@ -1814,4 +1820,210 @@ async function competencyOverview(el) {
     )
   );
   mount(el, h("p", { class: "muted" }, "Gid tarjimon kasb standarti (NO1.232.1901/Б-22) va 51010304-Turizm ta'lim dasturi bo'yicha kompetensiyalar. ", h("a", { href: "#/standard?tab=functions" }, "Standartni ko'rish →")), summary, list);
+}
+
+// ---------------- Tadqiqot arxivi (dissertatsiya III bobi) ----------------
+
+/** Diagnostika tahlili arxiv bilan: platformadagi B → daraja kodi (3/4/5), arxiv darajalari qo'shiladi. */
+function diagArchiveReport(complete, preSt, postSt) {
+  const plat = platformLevels(complete);
+  const lv = (st, g) => addLevels(ARCHIVE.total.levels[st][g], plat[st]?.[g]);
+  const csv = [["Bosqich", "Guruh", "n", "x̄ (kod)", "SD", "Past", "O'rta", "Yuqori"]];
+  const rows = [preSt, postSt].flatMap((st) => ["experimental", "control"].map((g) => {
+    const L = lv(st, g);
+    const codes = codesFrom(L);
+    const n = codes.length;
+    const newN = (plat[st]?.[g] || [0, 0, 0]).reduce((a, b) => a + b, 0);
+    csv.push([st, COHORTS[g], n, fmt(mean(codes)), fmt(sd(codes)), ...L]);
+    return h("tr", {}, h("td", {}, st), h("td", {}, COHORTS[g]), h("td", {}, n, newN ? h("small", { class: "muted" }, ` (+${newN} yangi)`) : null), h("td", {}, `${fmt(mean(codes))} ± ${fmt(sd(codes))}`), L.map((x) => h("td", {}, `${x} (${fmt((x / n) * 100, 1)}%)`)));
+  }));
+  const t = (st) => welchT(codesFrom(lv(st, "experimental")), codesFrom(lv(st, "control")));
+  const chi = (st) => chiSquare([lv(st, "experimental"), lv(st, "control")]);
+  const tStr = (r) => (r ? `t = ${fmt(r.t)}, df = ${fmt(r.df, 1)}; ${significance(r.p)}; d = ${fmt(r.d)}` : "—");
+  const eta = levelMean(lv(postSt, "experimental")) / levelMean(lv(postSt, "control"));
+  return h("div", { class: "stack" },
+    h("div", { class: "alert alert-info" }, "📚 Arxiv (2024–2026, n = 213) va platformadagi to'liq diagnostika varaqalari birlashtirildi. Arxivda individual ballar emas, darajalar soni saqlangani uchun barcha hisoblar daraja kodlari (past 3, o'rta 4, yuqori 5) bo'yicha — dissertatsiya metodikasiga mos. Juftlangan t-mezoni faqat platforma ma'lumotlarida mumkin (arxivni o'chiring)."),
+    h("div", { class: "table-wrap" }, h("table", { class: "table" }, h("thead", {}, h("tr", {}, ["Bosqich", "Guruh", "n", "x̄ ± SD", ...DIAG_LEVELS].map((x) => h("th", {}, x)))), h("tbody", {}, rows))),
+    h("div", { class: "grid cols-3" },
+      resultBox(`TG va NG — ${preSt}`, tStr(t(preSt)), ""),
+      resultBox(`TG va NG — ${postSt}`, tStr(t(postSt)), t(postSt)?.p < 0.05 && t(postSt).t > 0 ? "Tajriba guruhi natijalari statistik ahamiyatli darajada yuqori." : ""),
+      resultBox("Samaradorlik koeffitsiyenti", Number.isFinite(eta) ? `K = x̄(TG) / x̄(NG) = ${fmt(eta, 3)}` : "—", "")),
+    h("p", { class: "small" }, h("b", {}, "Pirson χ²: "), [preSt, postSt].map((st) => { const c = chi(st); return `${st} — ${c ? `χ² = ${fmt(c.chi2, 2)}, df = ${c.df}; ${significance(c.p)}` : "—"}`; }).join("; ")),
+    levelChart(DIAG_LEVELS, [
+      { name: `TG — ${preSt}`, values: lv(preSt, "experimental") },
+      { name: `TG — ${postSt}`, values: lv(postSt, "experimental") },
+      { name: `NG — ${preSt}`, values: lv(preSt, "control") },
+      { name: `NG — ${postSt}`, values: lv(postSt, "control") },
+    ]),
+    h("div", { class: "row end" }, h("a", { class: "btn ghost", href: "#/teacher/archive" }, "📚 Arxiv jadvallari"), h("button", { class: "btn ghost", onclick: () => downloadFile(`diagnostika-arxiv-${preSt}-${postSt}.csv`, toCSV(csv)) }, "⬇ CSV")));
+}
+
+const ST_NAMES = { T0: "Tajriba boshida (T0)", T1: "Shakllantiruvchi (T1)", T2: "Tajriba oxirida (T2)" };
+const pct1 = (n, total) => (total ? fmt((n / total) * 100, 1) : "—");
+
+/** Arxiv + platformaning to'liq diagnostika varaqalari: TG/NG × bosqich bo'yicha darajalar [Past, O'rta, Yuqori]. */
+function platformLevels(records) {
+  const out = {};
+  for (const r of records) {
+    if (r.result?.B == null) continue;
+    const g = r.user?.cohort;
+    if (g !== "experimental" && g !== "control") continue;
+    const cell = ((out[r.stage] ||= {})[g] ||= [0, 0, 0]);
+    cell[levelIndexOfB(r.result.B)]++;
+  }
+  return out;
+}
+
+function compareStats(a, b) {
+  const t = welchT(codesFrom(a), codesFrom(b));
+  const chi = chiSquare([a, b]);
+  return { mT: levelMean(a), mN: levelMean(b), t, chi };
+}
+
+async function archiveView(el) {
+  let records = [];
+  try {
+    records = (await api.get("admin/diagnostics")).records || [];
+  } catch {}
+  const plat = platformLevels(records);
+  const platN = Object.values(plat).reduce((s, st) => s + Object.values(st).reduce((x, a) => x + a.reduce((p, q) => p + q, 0), 0), 0);
+  const T = ARCHIVE.total;
+  const groups = [["experimental", "Tajriba-sinov guruhlari"], ["control", "Nazorat guruhlari"]];
+  const csv = [["Manba", "Texnikum", "Bosqich", "Guruh", "Past", "O'rta", "Yuqori", "n", "x̄ (kod)"]];
+
+  const levelTable = (name, levels, n, tableNo) => {
+    const rows = ARCHIVE_LEVELS.map((L, li) => [L, li]).reverse();
+    const cell = (st, g, li) => {
+      const v = levels[st]?.[g];
+      if (Array.isArray(v)) return [v[li], pct1(v[li], v.reduce((a, b) => a + b, 0))];
+      if (v && li === 2) return [v.Yuqori, pct1(v.Yuqori, n[g])];
+      return ["—", "—"];
+    };
+    for (const st of ["T0", "T1", "T2"]) for (const [g] of groups) {
+      const v = levels[st]?.[g];
+      if (Array.isArray(v)) csv.push(["Arxiv", name, st, COHORTS[g], ...v, v.reduce((a, b) => a + b, 0), fmt(levelMean(v))]);
+    }
+    return h("div", { class: "card table-wrap" },
+      h("h3", {}, name, tableNo ? h("small", { class: "muted" }, ` · ${tableNo}-jadval`) : null, h("small", { class: "muted" }, ` · TG ${n.experimental} / NG ${n.control}`)),
+      h("table", { class: "table arch-table" },
+        h("thead", {},
+          h("tr", {}, h("th", { rowspan: 2 }, "Daraja"), groups.map(([, gl]) => h("th", { colspan: 6, class: "center" }, gl))),
+          h("tr", {}, groups.flatMap(() => ["T0", "T1", "T2"].map((st) => h("th", { colspan: 2, class: "center" }, st))))),
+        h("tbody", {},
+          rows.map(([L, li]) => h("tr", {}, h("td", {}, h("b", {}, L)), groups.flatMap(([g]) => ["T0", "T1", "T2"].flatMap((st) => { const [c, p] = cell(st, g, li); return [h("td", { class: "num" }, c), h("td", { class: "num muted" }, p === "—" ? "" : `${p}%`)]; })))),
+          h("tr", { class: "total" }, h("td", {}, "x̄ (kod)"), groups.flatMap(([g]) => ["T0", "T1", "T2"].map((st) => { const v = levels[st]?.[g]; return h("td", { colspan: 2, class: "center num" }, Array.isArray(v) ? fmt(levelMean(v)) : "—"); }))))));
+  };
+
+  // Dissertatsiyadagi va platforma qayta hisoblagan statistik ko'rsatkichlar
+  const statRows = ["T0", "T1", "T2"].map((st) => {
+    const c = compareStats(T.levels[st].experimental, T.levels[st].control);
+    const pub = ARCHIVE.published[st];
+    const same = (a, b, eps = 0.011) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= eps;
+    const ok = same(c.t?.t, pub.t) && same(c.t?.d, pub.d) && same(c.chi?.chi2, pub.chi2);
+    return h("tr", {},
+      h("td", {}, ST_NAMES[st]),
+      h("td", { class: "num" }, `${fmt(c.mT)} / ${fmt(c.mN)}`),
+      h("td", { class: "num" }, `${fmt(c.t?.t)} (df ${fmt(c.t?.df, 1)})`),
+      h("td", { class: "num" }, significance(c.t?.p)),
+      h("td", { class: "num" }, fmt(c.t?.d)),
+      h("td", { class: "num" }, `${fmt(c.chi?.chi2)} (${fmt(c.chi?.p, 3)})`),
+      h("td", { class: "num muted" }, `t = ${fmt(pub.t)}; p = ${fmt(pub.p, 3)}; d = ${fmt(pub.d)}; χ² = ${fmt(pub.chi2)}`),
+      h("td", {}, ok ? h("span", { class: "badge badge-ok" }, "✓ mos") : h("span", { class: "badge badge-warn" }, "farq bor")));
+  });
+
+  const collegeRows = ARCHIVE.colleges.map((c) => {
+    const s2 = compareStats(c.levels.T2.experimental, c.levels.T2.control);
+    const pub = c.published.T2;
+    return h("tr", {}, h("td", {}, c.short), h("td", { class: "num" }, `${c.n.experimental} / ${c.n.control}`), h("td", { class: "num" }, `${fmt(s2.mT)} / ${fmt(s2.mN)}`), h("td", { class: "num" }, fmt(s2.t?.t)), h("td", { class: "num" }, fmt(s2.t?.p, 3)), h("td", { class: "num" }, fmt(s2.t?.d)), h("td", { class: "num muted" }, `t = ${fmt(pub.t)}; p = ${fmt(pub.p, 3)}; d = ${fmt(pub.d)}`));
+  });
+
+  // Arxiv + platforma: yangi to'liq diagnostika varaqalari shu darajalar bo'yicha qo'shiladi
+  const merged = ["T0", "T1", "T2"].map((st) => {
+    const a = addLevels(T.levels[st].experimental, plat[st]?.experimental);
+    const b = addLevels(T.levels[st].control, plat[st]?.control);
+    const c = compareStats(a, b);
+    const addA = (plat[st]?.experimental || [0, 0, 0]).reduce((x, y) => x + y, 0);
+    const addB = (plat[st]?.control || [0, 0, 0]).reduce((x, y) => x + y, 0);
+    csv.push(["Arxiv + platforma", "Barchasi", st, "TG", ...a, a.reduce((x, y) => x + y, 0), fmt(c.mT)], ["Arxiv + platforma", "Barchasi", st, "NG", ...b, b.reduce((x, y) => x + y, 0), fmt(c.mN)]);
+    return { st, a, b, c, addA, addB };
+  });
+
+  mount(
+    el,
+    h("div", { class: "card arch-hero" },
+      h("div", {},
+        h("h2", {}, "📚 ", ARCHIVE.title),
+        h("p", {}, ARCHIVE.design, ". Eksperimental omil — “Turizmda raqamli texnologiyalar” kursi, raqamli kasbiy topshiriqlar, “Safar Akademiya” platformasi va AI virtual gidlik trenajyori."),
+        h("p", { class: "muted small" }, `Manba: ${ARCHIVE.source}. Mezon: B = (M + KK + AR) / 3; 3,00–3,49 — past, 3,50–4,49 — o'rta, 4,50–5,00 — yuqori. Statistika daraja kodlari (3, 4, 5) bo'yicha.`)),
+      h("div", { class: "arch-kpis" },
+        [["213", "ishtirokchi"], ["106 / 107", "TG / NG"], ["3", "texnikum"], ["+16,0%", "TG yuqori daraja o'sishi"], ["d = 0,41", "T2 effekt kattaligi"], ["p = 0,003", "T2 Styudent mezoni"]].map(([v, l]) => h("div", {}, h("b", {}, v), h("span", {}, l))))),
+    h("div", { class: "card" },
+      h("h3", {}, "Tajriba-sinov dizayni (3.1-jadval)"),
+      h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Tajriba bazasi", "Jami", "TG", "NG", "Davomiyligi"].map((t) => h("th", {}, t)))),
+        h("tbody", {}, ARCHIVE.colleges.map((c) => h("tr", {}, h("td", {}, c.name), h("td", { class: "num" }, c.n.experimental + c.n.control), h("td", { class: "num" }, c.n.experimental), h("td", { class: "num" }, c.n.control), h("td", {}, "2024–2026"))),
+          h("tr", { class: "total" }, h("td", {}, "Jami"), h("td", { class: "num" }, 213), h("td", { class: "num" }, 106), h("td", { class: "num" }, 107), h("td", {}, "3 yil"))))),
+      h("p", { class: "small muted" }, Object.entries(ARCHIVE.periods).map(([k, v]) => `${k} — ${v}`).join(" · "))),
+    h("div", { class: "card" },
+      h("h3", {}, "Yuqori va past daraja ulushlari dinamikasi (T0 → T1 → T2)"),
+      archTrend(T)),
+    levelTable("Barcha texnikumlar bo'yicha umumiy natijalar", T.levels, T.n, "3.12"),
+    ...ARCHIVE.colleges.map((c) => levelTable(c.name, c.levels, c.n, c.table)),
+    h("div", { class: "card table-wrap" },
+      h("h3", {}, "Statistik tekshiruv: platforma qayta hisobi va dissertatsiya (3.13–3.14-jadvallar)"),
+      h("p", { class: "small muted" }, "Platforma darajalar sonidan Welch t-mezoni, Koen d va Pirson χ² ni qayta hisoblaydi va dissertatsiyada e'lon qilingan qiymatlar bilan solishtiradi."),
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Bosqich", "x̄ TG / NG", "t (df)", "p", "Koen d", "χ² (p)", "Dissertatsiyada", ""].map((t) => h("th", {}, t)))),
+        h("tbody", {}, statRows))),
+    h("div", { class: "card table-wrap" },
+      h("h3", {}, "Texnikumlar kesimida tajriba oxiri (3.15-jadval)"),
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Texnikum", "n (T / N)", "x̄ TG / NG", "t", "p", "Koen d", "Dissertatsiyada"].map((t) => h("th", {}, t)))),
+        h("tbody", {}, collegeRows)),
+      h("p", { class: "small muted" }, "Texnikumlar bo'yicha farq yo'nalishi bir xil (TG foydasiga), ammo alohida tanlanmalar kichikligi sababli p > 0,05; asosiy xulosa umumiy tanlanma (n = 213) bo'yicha.")),
+    h("div", { class: "card table-wrap arch-merge" },
+      h("h3", {}, "🔗 Arxiv + platforma: birlashtirilgan tahlil"),
+      h("p", { class: "small" }, platN
+        ? `Platformadagi ${platN} ta to'liq baholangan diagnostika varaqasi (TG/NG belgilangan o'quvchilar) arxiv natijalariga B indeksi darajasi bo'yicha qo'shildi.`
+        : "Platformada hali to'liq baholangan yangi diagnostika varaqalari yo'q — jadval arxiv natijalarini ko'rsatadi. O'quvchilar T0/T1/T2 diagnostikasini topshirib, siz baholaganingizda ular shu yerga avtomatik qo'shiladi."),
+      h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Bosqich", "TG: past / o'rta / yuqori", "NG: past / o'rta / yuqori", "Yangi (TG / NG)", "x̄ TG / NG", "t; p; d", "χ²"].map((t) => h("th", {}, t)))),
+        h("tbody", {}, merged.map(({ st, a, b, c, addA, addB }) => h("tr", {},
+          h("td", {}, ST_NAMES[st]),
+          h("td", { class: "num" }, a.join(" / ")),
+          h("td", { class: "num" }, b.join(" / ")),
+          h("td", { class: "num" }, addA || addB ? h("b", {}, `+${addA} / +${addB}`) : "—"),
+          h("td", { class: "num" }, `${fmt(c.mT)} / ${fmt(c.mN)}`),
+          h("td", { class: "num" }, c.t ? `${fmt(c.t.t)}; ${significance(c.t.p)}; d = ${fmt(c.t.d)}` : "—"),
+          h("td", { class: "num" }, c.chi ? `${fmt(c.chi.chi2)} (${fmt(c.chi.p, 3)})` : "—"))))),
+      h("p", { class: "small muted" }, "Yangi o'quvchilar ro'yxatdan o'tishda texnikum nomini ro'yxatdan tanlaydi va TG/NG guruhini belgilaydi — shunda ularning natijalari arxivdagi texnikum va guruh bilan avtomatik uyg'unlashadi. Bosh sahifa pastidagi ochiq monitoring ham “Birlashgan” ko'rinishda shu ma'lumotlarni ko'rsatadi.")),
+    h("div", { class: "row end" }, h("button", { class: "btn ghost", onclick: () => downloadFile("tadqiqot-arxivi.csv", toCSV(csv)) }, "⬇ Arxiv jadvallari (CSV)"))
+  );
+}
+
+/** T0 → T1 → T2: TG va NG da yuqori va past daraja ulushlari (chiziqli diagramma). */
+function archTrend(T) {
+  const W = 680, H = 240, pad = { l: 92, r: 64, t: 18, b: 34 };
+  const xs = ["T0", "T1", "T2"];
+  const X = (i) => pad.l + (i * (W - pad.l - pad.r)) / 2;
+  const Y = (p) => pad.t + (1 - p / 60) * (H - pad.t - pad.b);
+  const share = (st, g, li) => (T.levels[st][g][li] / T.levels[st][g].reduce((a, b) => a + b, 0)) * 100;
+  const series = [
+    ["TG — yuqori", "experimental", 2, PALETTE[0], ""],
+    ["NG — yuqori", "control", 2, PALETTE[1], ""],
+    ["TG — past", "experimental", 0, PALETTE[0], "6 6"],
+    ["NG — past", "control", 0, PALETTE[1], "6 6"],
+  ];
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Yuqori va past daraja ulushlari dinamikasi">`;
+  for (let p = 0; p <= 60; p += 15) svg += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${Y(p)}" y2="${Y(p)}" class="grid-line"/><text x="${pad.l - 52}" y="${Y(p) + 4}" text-anchor="end" class="axis">${p}%</text>`;
+  xs.forEach((st, i) => (svg += `<text x="${X(i)}" y="${H - 10}" text-anchor="middle" class="axis-x">${st}</text>`));
+  for (const [name, g, li, color, dash] of series) {
+    const pts = xs.map((st, i) => [X(i), Y(share(st, g, li))]);
+    svg += `<polyline points="${pts.map((p) => p.join(",")).join(" ")}" fill="none" stroke="${color}" stroke-width="3" stroke-dasharray="${dash}" stroke-linecap="round" class="arch-line"/>`;
+    pts.forEach(([x, y], i) => (svg += `<circle cx="${x}" cy="${y}" r="5" fill="${color}"><title>${name}, ${xs[i]}: ${share(xs[i], g, li).toFixed(1)}%</title></circle>${i === 1 ? "" : `<text x="${i ? x + 9 : x - 9}" y="${y + 4}" text-anchor="${i ? "start" : "end"}" class="bar-label">${share(xs[i], g, li).toFixed(1).replace(".", ",")}%</text>`}`));
+  }
+  svg += "</svg>";
+  const chart = h("div", { class: "chart" });
+  chart.innerHTML = svg;
+  return h("div", {}, chart, h("div", { class: "legend" }, series.map(([name, , , color, dash]) => h("span", {}, h("i", { style: { background: color, opacity: dash ? 0.55 : 1 } }), name))));
 }
