@@ -346,3 +346,4 @@
 @media (max-width: 900px) { .studio-layout { grid-template-columns: 1fr; } }
 .voice-cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 .voice-card .row { flex-wrap: wrap; justify-content: center; }
+.scene-cta.second { bottom: 62px; background: rgba(10, 46, 51, 0.82); color: #fff; }

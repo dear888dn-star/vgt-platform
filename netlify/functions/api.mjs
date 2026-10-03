@@ -531,6 +531,11 @@ async function saveProgress(req) {
     activity,
     srs,
     srsStats: { reviews: Math.max(0, Math.min(100000, Number(st.reviews) || 0)), lastReview: str(st.lastReview, 10) },
+    geo: (() => {
+      const g = obj(b.geo);
+      const clamp = (v, max) => Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
+      return { best: clamp(g.best, 8000), plays: clamp(g.plays, 100000), history: (Array.isArray(g.history) ? g.history : []).slice(0, 10).map((x) => ({ score: clamp(x?.score, 8000), at: str(x?.at, 10) })) };
+    })(),
     updatedAt: new Date().toISOString(),
   };
   if (JSON.stringify(progress).length > 200_000) throw new HttpError(413, "Ma'lumot hajmi juda katta");
@@ -1283,9 +1288,50 @@ async function loadGame(pin) {
 
 const timeLeftOf = (g) => (g.state === "question" ? Math.max(0, g.duration * 1000 - (Date.now() - Date.parse(g.qStartedAt))) : 0);
 
+async function newLivePin() {
+  let pin;
+  for (let i = 0; i < 20; i++) {
+    pin = String(Math.floor(100000 + Math.random() * 900000));
+    if (!(await db().get(liveKey(pin)))) break;
+  }
+  return pin;
+}
+
+// "So'z buluti" (aqliy hujum): o'quvchilar ochiq savolga 1–3 so'z yuboradi, proyektorda jonli bulut.
+const cloudNorm = (w) => w.toLowerCase().replace(/[‘’`ʻʼ]/g, "'").replace(/^[\s"'«»“”.,!?;:()-]+|[\s"'«»“”.,!?;:()-]+$/g, "").replace(/\s+/g, " ");
+
+async function cloudCreate(teacher, b) {
+  const prompt = str(b.prompt, 160);
+  if (prompt.length < 3) throw new HttpError(400, "Savolni yozing");
+  const pin = await newLivePin();
+  await db().set(liveKey(pin), {
+    kind: "cloud", pin, hostId: teacher.id, hostName: teacher.name,
+    title: prompt, prompt, maxWords: Math.max(1, Math.min(3, Number(b.maxWords) || 3)),
+    state: "collect", qIndex: 0, questions: [], board: {}, hidden: [], createdAt: new Date().toISOString(),
+  });
+  return json({ pin }, 201);
+}
+
+async function cloudWords(pin, hidden = []) {
+  const keys = await db().list(`liveans/${pin}/`);
+  const docs = (await Promise.all(keys.map(cachedDoc))).filter(Boolean);
+  const map = new Map();
+  for (const d of docs) for (const w of d.words || []) {
+    const k = cloudNorm(w);
+    if (!k || hidden.includes(k)) continue;
+    const e = map.get(k) || { key: k, count: 0, forms: {} };
+    e.count++;
+    e.forms[w] = (e.forms[w] || 0) + 1;
+    map.set(k, e);
+  }
+  const words = [...map.values()].map((e) => ({ key: e.key, text: Object.entries(e.forms).sort((a, c) => c[1] - a[1])[0][0], count: e.count })).sort((a, c) => c.count - a.count).slice(0, 80);
+  return { words, responses: docs.length };
+}
+
 async function liveCreate(req) {
   const teacher = await requireTeacher(req);
   const b = await body(req);
+  if (b.kind === "cloud") return cloudCreate(teacher, b);
   const ids = Array.isArray(b.topicIds) && b.topicIds.length ? b.topicIds : TOPICS.map((t) => t.id);
   const pool = TOPICS.filter((t) => ids.includes(t.id)).flatMap((t) => t.quiz.map((q) => ({ ...q, topic: t.num })));
   if (!pool.length) throw new HttpError(400, "Tanlangan mavzularda test savollari yo'q");
@@ -1298,11 +1344,7 @@ async function liveCreate(req) {
       const opts = shuffle(order);
       return { q: q.q, options: opts.map((i) => q.options[i]), correct: opts.indexOf(q.correct), topic: q.topic };
     });
-  let pin;
-  for (let i = 0; i < 20; i++) {
-    pin = String(Math.floor(100000 + Math.random() * 900000));
-    if (!(await db().get(liveKey(pin)))) break;
-  }
+  const pin = await newLivePin();
   const game = {
     pin, hostId: teacher.id, hostName: teacher.name,
     title: str(b.title, 100) || "Safar Live viktorinasi",
@@ -1325,6 +1367,7 @@ async function liveHost(req, pin) {
   const g = await loadGame(pin);
   if (g.hostId !== user.id) throw new HttpError(403, "Bu o'yin sizga tegishli emas");
   const players = await livePlayers(pin);
+  if (g.kind === "cloud") return json({ ...g, players, ...(await cloudWords(pin, g.hidden)) });
   let answered = 0;
   if (g.state === "question") answered = (await db().list(`liveans/${pin}/`)).filter((k) => k.endsWith(`/${g.qIndex}`)).length;
   return json({ ...g, players, answered, timeLeft: timeLeftOf(g), serverNow: Date.now() });
@@ -1334,7 +1377,16 @@ async function liveControl(req, pin) {
   const user = await requireTeacher(req);
   const g = await loadGame(pin);
   if (g.hostId !== user.id) throw new HttpError(403, "Bu o'yin sizga tegishli emas");
-  const { action } = await body(req);
+  const { action, word } = await body(req);
+  if (g.kind === "cloud") {
+    if (action === "close") g.state = "closed";
+    else if (action === "open") g.state = "collect";
+    else if (action === "hide" && typeof word === "string") g.hidden = [...new Set([...(g.hidden || []), cloudNorm(word)])].slice(0, 200);
+    else if (action === "unhide") g.hidden = [];
+    else throw new HttpError(400, "Noma'lum amal");
+    await db().set(liveKey(pin), g);
+    return json({ ok: true, state: g.state });
+  }
   if (action === "start" || action === "next") {
     if (g.state === "question") throw new HttpError(409, "Avval javoblarni oching");
     const nextQ = g.qIndex + 1;
@@ -1370,7 +1422,7 @@ async function liveControl(req, pin) {
 
 async function liveJoin(req, pin) {
   const g = await loadGame(pin);
-  if (g.state === "final") throw new HttpError(409, "O'yin allaqachon tugagan");
+  if (g.state === "final" || g.state === "closed") throw new HttpError(409, "O'yin allaqachon tugagan");
   const b = await body(req);
   const name = str(b.name, 24).replace(/\s+/g, " ").trim();
   if (name.length < 2) throw new HttpError(400, "Ismingizni kiriting");
@@ -1393,6 +1445,18 @@ async function liveAnswer(req, pin) {
   const b = await body(req);
   const g = await loadGame(pin);
   const p = await livePlayer(pin, str(b.pid, 40), str(b.key, 60));
+  if (g.kind === "cloud") {
+    if (g.state !== "collect") throw new HttpError(409, "Javoblar qabul qilish yopilgan");
+    if (await db().get(liveAnsKey(pin, p.pid, 0))) throw new HttpError(409, "Javobingiz allaqachon qabul qilingan");
+    const seen = new Set();
+    const words = (Array.isArray(b.words) ? b.words : [])
+      .map((w) => str(w, 30).replace(/\s+/g, " "))
+      .filter((w) => cloudNorm(w) && !seen.has(cloudNorm(w)) && seen.add(cloudNorm(w)))
+      .slice(0, g.maxWords);
+    if (!words.length) throw new HttpError(400, "Kamida bitta so'z yozing");
+    await db().set(liveAnsKey(pin, p.pid, 0), { pid: p.pid, words, at: new Date().toISOString() });
+    return json({ ok: true, words });
+  }
   const q = Number(b.q);
   if (g.state !== "question" || q !== g.qIndex) throw new HttpError(409, "Bu savol uchun vaqt tugagan");
   const elapsed = Date.now() - Date.parse(g.qStartedAt);
@@ -1414,6 +1478,10 @@ async function livePlay(req, pin) {
   const url = new URL(req.url);
   const g = await loadGame(pin);
   const p = await livePlayer(pin, url.searchParams.get("pid") || "", url.searchParams.get("key") || "");
+  if (g.kind === "cloud") {
+    const mine = await cachedDoc(liveAnsKey(pin, p.pid, 0));
+    return json({ kind: "cloud", title: g.title, prompt: g.prompt, maxWords: g.maxWords, state: g.state, qIndex: 0, me: { name: p.name, avatar: p.avatar }, submitted: Boolean(mine), mine: mine?.words || [] });
+  }
   const out = { title: g.title, state: g.state, qIndex: g.qIndex, total: g.questions.length, me: { name: p.name, avatar: p.avatar }, duration: g.duration };
   const ranks = Object.entries(g.board).sort((a, b) => b[1].total - a[1].total);
   const rankOf = (pid) => ranks.findIndex(([x]) => x === pid) + 1;

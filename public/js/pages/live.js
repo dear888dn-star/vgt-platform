@@ -54,8 +54,37 @@ export function createForm() {
       h("div", {}, h("b", {}, "Mavzular "), h("small", { class: "muted" }, "(tanlanmasa — barcha mavzulardan)"), chips),
       h("div", { class: "grid cols-2" }, h("label", { class: "field" }, h("span", {}, "Savollar soni"), count), h("label", { class: "field" }, h("span", {}, "Har bir savolga vaqt"), duration)),
       h("label", { class: "check-row" }, readAloud, " 🔊 Savollarni AI ovozida o'qib berish (Gemini TTS)"),
-      btn)
+      btn),
+    cloudForm()
   );
+}
+
+const CLOUD_IDEAS = [
+  "Raqamli turizm deganda nimani tushunasiz?",
+  "Yaxshi gid qanday bo'lishi kerak? (1–3 so'z)",
+  "Samarqandni bir so'z bilan ta'riflang",
+  "Turistlar uchun eng foydali mobil ilova qaysi?",
+  "Bugungi darsdan nimani eslab qoldingiz?",
+];
+
+function cloudForm() {
+  const prompt = h("input", { maxlength: 160, placeholder: CLOUD_IDEAS[0] });
+  const maxWords = h("select", {}, [1, 2, 3].map((n) => h("option", { value: n, selected: n === 3 }, `${n} ta so'z`)));
+  const btn = h("button", { class: "btn lg", onclick: async () => {
+    btn.disabled = true;
+    try {
+      const { pin } = await api.post("live", { kind: "cloud", prompt: prompt.value.trim() || prompt.placeholder, maxWords: Number(maxWords.value) });
+      location.hash = `#/live/host/${pin}`;
+    } catch (e) {
+      toast(e.message, "error");
+      btn.disabled = false;
+    }
+  } }, "☁️ So'z bulutini boshlash");
+  return h("div", { class: "card stack wc-promo" },
+    h("div", { class: "row between wrap" }, h("div", {}, h("h3", {}, "☁️ So'z buluti — jonli aqliy hujum"), h("p", { class: "muted" }, "Ochiq savol bering: o'quvchilar telefonda 1–3 so'z yuboradi, proyektorda jonli so'z buluti o'sib boradi. Ko'p takrorlangan so'zlar kattaroq ko'rinadi. Dars boshida motivatsiya, oxirida refleksiya uchun qulay.")), h("div", { class: "wc-mini", "aria-hidden": "true" }, ["gid", "ilova", "QR", "xarita", "AR", "onlayn"].map((w, i) => h("span", { style: { "--i": i } }, w)))),
+    h("label", { class: "field" }, h("span", {}, "Savol"), prompt),
+    h("div", { class: "chips" }, CLOUD_IDEAS.map((q) => h("button", { type: "button", class: "chip", onclick: () => (prompt.value = q) }, q))),
+    h("div", { class: "row wrap" }, h("label", { class: "field" }, h("span", {}, "Har bir o'quvchi"), maxWords), h("div", { class: "grow" }), btn));
 }
 
 // ---------------- O'quvchi: qo'shilish ----------------
@@ -120,7 +149,7 @@ export async function renderPlay(el, pin) {
     if (!alive) return;
     try {
       const d = await api.get(`live/${pin}/play?pid=${cred.pid}&key=${cred.key}`);
-      const changed = d.state !== last.state || d.qIndex !== last.qIndex || (d.state === "question" && d.answered !== last.answered);
+      const changed = d.state !== last.state || d.qIndex !== last.qIndex || (d.state === "question" && d.answered !== last.answered) || d.submitted !== last.submitted;
       if (changed) draw(d);
       last = d;
     } catch (e) {
@@ -135,7 +164,40 @@ export async function renderPlay(el, pin) {
 
   const header = (d) => h("div", { class: "lpl-head" }, h("span", { class: "lpl-me" }, d.me.avatar, " ", d.me.name), h("span", {}, d.qIndex >= 0 ? `${Math.min(d.qIndex + 1, d.total)} / ${d.total}` : d.title));
 
+  function drawCloud(d) {
+    screen.className = "live-play st-cloud";
+    const head = h("div", { class: "lpl-head" }, h("span", { class: "lpl-me" }, d.me.avatar, " ", d.me.name), h("span", {}, "☁️ So'z buluti"));
+    if (d.state === "closed") {
+      alive = false;
+      return screen.replaceChildren(head, h("div", { class: "lp-msg" }, h("div", { class: "big-emoji pop" }, "☁️"), h("h2", {}, "Rahmat!"), h("p", {}, "So'z buluti yakunlandi — natijani proyektorda ko'ring."), d.mine.length ? h("div", { class: "wc-mine" }, d.mine.map((w) => h("span", {}, w))) : null, h("a", { class: "btn", href: "#/live" }, "Yangi o'yinga qo'shilish")));
+    }
+    if (d.submitted) {
+      return screen.replaceChildren(head, h("div", { class: "lp-msg" }, h("div", { class: "big-emoji bounce" }, "🎈"), h("h2", {}, "So'zlaringiz bulutda!"), h("div", { class: "wc-mine" }, d.mine.map((w) => h("span", {}, w))), h("p", {}, "Proyektorga qarang — bulut o'sib bormoqda…")));
+    }
+    const inputs = Array.from({ length: d.maxWords }, (_, i) => h("input", { class: "wc-input", maxlength: 30, placeholder: `${i + 1}-so'z`, autocomplete: "off", enterkeyhint: i + 1 < d.maxWords ? "next" : "send" }));
+    const form = h("form", { class: "wc-form", onsubmit: async (e) => {
+      e.preventDefault();
+      const words = inputs.map((x) => x.value.trim()).filter(Boolean);
+      if (!words.length) return toast("Kamida bitta so'z yozing", "warn");
+      if (sending) return;
+      sending = true;
+      try {
+        const r = await api.post(`live/${pin}/answer`, { pid: cred.pid, key: cred.key, words });
+        sfx.correct();
+        const nd = { ...d, submitted: true, mine: r.words };
+        last = nd;
+        drawCloud(nd);
+      } catch (ex) {
+        toast(ex.message, "warn");
+      }
+      sending = false;
+    } }, h("p", { class: "lpl-q" }, d.prompt), ...inputs, h("button", { class: "btn lg block", type: "submit" }, "☁️ Yuborish"));
+    screen.replaceChildren(head, form);
+    inputs[0].focus();
+  }
+
   function draw(d) {
+    if (d.kind === "cloud") return drawCloud(d);
     if (d.state === "lobby") {
       screen.className = "live-play st-lobby";
       screen.replaceChildren(header(d), h("div", { class: "lp-msg" }, h("div", { class: "big-emoji bounce" }, d.me.avatar), h("h2", {}, "Siz o'yindasiz!"), h("p", {}, "Ismingizni proyektorda ko'ring. O'qituvchi o'yinni boshlashini kuting…"), h("div", { class: "dots" }, h("i"), h("i"), h("i"))));
@@ -248,6 +310,13 @@ export async function renderHost(el, pin) {
     clearTimeout(timer);
     try {
       g = await api.get(`live/${pin}/host`);
+      if (g.kind === "cloud") {
+        if (force || lastKey !== `cloud|${g.state}`) drawCloudHost();
+        else updateCloud();
+        lastKey = `cloud|${g.state}`;
+        if (alive) timer = setTimeout(poll, 1500);
+        return;
+      }
       const key = `${g.state}|${g.qIndex}|${view}|${g.state === "lobby" ? g.players.length : ""}`;
       if (force || key !== lastKey) draw();
       else update();
@@ -275,6 +344,72 @@ export async function renderHost(el, pin) {
         sfx.tick();
       }
     }
+  }
+
+  // ---- So'z buluti (proyektor) ----
+  const cloudNodes = new Map();
+  let cloudBox = null;
+  let cloudStats = null;
+  const PALETTE = ["#2bb3c0", "#f4b740", "#e3524a", "#7c5cff", "#3ecf8e", "#ff8a3d", "#4aa3ff", "#ff5fa2"];
+  const hashOf = (t) => [...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+  function drawCloudHost() {
+    cloudNodes.clear();
+    stage.className = `live-host st-cloud ${g.state}`;
+    cloudBox = h("div", { class: "wc-cloud", "aria-live": "polite" });
+    cloudStats = h("div", { class: "wc-stats" });
+    const closed = g.state === "closed";
+    stage.replaceChildren(
+      h("div", { class: "wc-host" },
+        h("div", { class: "wc-top" },
+          h("div", { class: "wc-prompt" }, h("small", {}, "☁️ So'z buluti"), h("h1", {}, g.prompt)),
+          h("div", { class: "wc-join" }, closed ? null : h("div", {}, h("small", {}, `${location.host}/#/live`), h("div", { class: "wc-pin" }, pin)), closed || !qr ? null : h("div", { class: "lh-qr small", html: qr }))),
+        cloudBox,
+        h("div", { class: "wc-bottom" },
+          cloudStats,
+          h("div", { class: "row wrap" },
+            h("button", { class: "btn ghost light", onclick: () => exportCsv(g.words.map((w) => [w.text, w.count]), ["So'z", "Soni"]) }, "⬇ CSV"),
+            g.hidden?.length ? h("button", { class: "btn ghost light", onclick: () => api.post(`live/${pin}/control`, { action: "unhide" }).then(() => poll(true)) }, `👁 Yashirilganlar (${g.hidden.length})`) : null,
+            h("button", { class: "btn lg", onclick: () => api.post(`live/${pin}/control`, { action: closed ? "open" : "close" }).then(() => (closed ? null : (confetti(), sfx.win()), poll(true))) }, closed ? "▶ Qayta ochish" : "⏹ Yakunlash"),
+            h("a", { class: "btn ghost light", href: "#/teacher/live" }, "🎮 Yangi"))))
+    );
+    updateCloud();
+  }
+
+  function updateCloud() {
+    const words = g.words || [];
+    const max = Math.max(1, ...words.map((w) => w.count));
+    cloudStats.replaceChildren(h("span", {}, `👥 ${g.players.length} ishtirokchi`), h("span", {}, `✍️ ${g.responses} javob`), h("span", {}, `☁️ ${words.length} so'z`), h("small", { class: "muted" }, "So'zni bosib yashirish mumkin"));
+    if (!words.length) {
+      if (!cloudBox.querySelector(".wc-empty")) cloudBox.replaceChildren(h("div", { class: "wc-empty" }, h("span", {}, "☁️"), h("p", {}, "Birinchi so'zlarni kutyapmiz…")));
+      return;
+    }
+    cloudBox.querySelector(".wc-empty")?.remove();
+    // Eng katta so'zlar markazda: navbatma-navbat boshiga va oxiriga qo'yamiz.
+    const ordered = [];
+    words.forEach((w, i) => (i % 2 ? ordered.unshift(w) : ordered.push(w)));
+    let fresh = false;
+    const keep = new Set();
+    ordered.forEach((w, i) => {
+      keep.add(w.key);
+      let node = cloudNodes.get(w.key);
+      if (!node) {
+        fresh = true;
+        node = h("button", { class: "wc-word new", title: "Bosing — yashirish", onclick: () => {
+          if (confirm(`“${w.text}” so'zi bulutdan yashirilsinmi?`)) api.post(`live/${pin}/control`, { action: "hide", word: w.key }).then(() => poll(true));
+        } });
+        node.addEventListener("animationend", () => node.classList.remove("new"), { once: true });
+        node.style.color = PALETTE[hashOf(w.key) % PALETTE.length];
+        cloudNodes.set(w.key, node);
+      }
+      node.textContent = w.text;
+      node.dataset.count = w.count;
+      node.style.fontSize = `${(1.1 + Math.pow(w.count / max, 0.75) * 4.6).toFixed(2)}rem`;
+      node.style.fontWeight = w.count === max ? 800 : 600 + Math.round((w.count / max) * 2) * 100;
+      if (cloudBox.children[i] !== node) cloudBox.insertBefore(node, cloudBox.children[i] || null);
+    });
+    for (const [k, node] of cloudNodes) if (!keep.has(k)) (node.remove(), cloudNodes.delete(k));
+    if (fresh) sfx.join();
   }
 
   const playersGrid = () => h("div", { class: "lh-players" }, g.players.map((p, i) => h("div", { class: "lh-player", style: { "--i": i % 12 } }, h("span", {}, p.avatar), h("b", {}, p.name))));
@@ -356,8 +491,8 @@ export async function renderHost(el, pin) {
     }
   }
 
-  function exportCsv(rows) {
-    const lines = [["O'rin", "Ism", "Ball", "To'g'ri javoblar"], ...rows.map(([, r], i) => [i + 1, r.name, r.total, r.correct])];
+  function exportCsv(rows, header) {
+    const lines = header ? [header, ...rows] : [["O'rin", "Ism", "Ball", "To'g'ri javoblar"], ...rows.map(([, r], i) => [i + 1, r.name, r.total, r.correct])];
     const csv = "﻿" + lines.map((l) => l.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(";")).join("\n");
     const a = h("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: `safar-live-${pin}.csv` });
     document.body.append(a);

@@ -50,6 +50,7 @@ function heroScene() {
     caption,
     dots,
     h("a", { href: "#/tour", class: "scene-cta" }, "🧭 Virtual sayohatga chiqish"),
+    h("a", { href: "#/geo", class: "scene-cta second" }, "🌍 Geo-sayohat o'yini"),
     h("span", { class: "float-chip c1", "aria-hidden": "true" }, "🎙️ AI gid"),
     h("span", { class: "float-chip c2", "aria-hidden": "true" }, "🗺️ Marshrut"),
     h("span", { class: "float-chip c3", "aria-hidden": "true" }, "📱 Raqamli turizm")
@@ -75,6 +76,7 @@ export async function render(el) {
     ["📝", "Kompleks diagnostika", "T0–T2 bosqichlarida anketa, test, amaliy topshiriqlar va refleksiya — natijalar avtomatik hisoblanadi.", "#/diagnostics"],
     ["🎬", "Mediateka va audiokitob", "Animatsion darslar, video darslar, taqdimotlar — va qo'llanma matnini o'zbekcha AI ovozida tinglash.", "#/media"],
     ["🧭", "Ekskursiya studiyasi", "O'z virtual ekskursiyangizni yarating: manzaralar, gid matni, AI ovozi va AI metodist tahlili. Havola orqali ulashing.", "#/studio"],
+    ["🌍", "Geo-sayohat o'yini", "Topishmoq va manzara bo'yicha O'zbekiston xaritasida turistik obyektni toping. Kun sayohati — butun sinf uchun bir xil 8 manzil.", "#/geo"],
     ["🛂", "Safar pasporti", "XP, darajalar, viza muhrlari, nishonlar, reyting va kursni tugatganlik sertifikati.", "#/passport"],
     ["🎯", "Kasb standarti", "Gid tarjimon kasb standarti: mehnat funksiyalari, kompetensiyalar va shaxsiy kompetensiya xaritangiz.", "#/standard"],
   ];

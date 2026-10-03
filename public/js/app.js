@@ -24,6 +24,7 @@ import * as tour from "./pages/tour.js";
 import * as media from "./pages/media.js";
 import * as studio from "./pages/studio.js";
 import * as live from "./pages/live.js";
+import * as geo from "./pages/geo.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -46,6 +47,7 @@ const routes = [
   [/^\/passport$/, passport.render, { auth: true }],
   [/^\/review$/, review.render],
   [/^\/tour$/, tour.render],
+  [/^\/geo$/, geo.render],
   [/^\/media$/, media.render],
   [/^\/live$/, live.renderJoin],
   [/^\/live\/play\/(\d{6})$/, live.renderPlay],

@@ -13,6 +13,7 @@ const SOURCES = [
   ["review", "🔁 Takrorlash"],
   ["streak", "🔥 Seriya"],
   ["studio", "🎬 Ekskursiya"],
+  ["geo", "🌍 Geo-sayohat"],
 ];
 
 export async function render(el) {

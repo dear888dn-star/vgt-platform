@@ -154,3 +154,39 @@ body.live-mode::before, body.live-mode::after { display: none; }
 .ia-opt { padding: 3px 4px; font-size: 0.74rem; text-align: center; white-space: nowrap; overflow: hidden; border-radius: 5px; background: var(--surface-2); color: var(--muted); }
 .ia-opt.key { background: var(--ok-soft); color: var(--ok); font-weight: 700; }
 tr.ia-critical > td { background: color-mix(in srgb, var(--err-soft) 60%, transparent); }
+
+/* ===== So'z buluti ===== */
+.wc-promo h3 { margin: 0 0 4px; }
+.wc-mini { position: relative; width: 190px; height: 90px; }
+.wc-mini span { position: absolute; font-weight: 800; color: var(--primary); animation: floatY 3s ease-in-out infinite; animation-delay: calc(var(--i) * -0.5s); }
+.wc-mini span:nth-child(1) { left: 40%; top: 30%; font-size: 1.6rem; } .wc-mini span:nth-child(2) { left: 0; top: 4%; color: var(--accent); }
+.wc-mini span:nth-child(3) { right: 0; top: 0; color: #e3524a; } .wc-mini span:nth-child(4) { left: 4%; bottom: 0; color: #7c5cff; font-size: 1.2rem; }
+.wc-mini span:nth-child(5) { right: 8%; bottom: 4%; color: #3ecf8e; } .wc-mini span:nth-child(6) { left: 46%; bottom: -4%; font-size: 0.8rem; color: var(--muted); }
+.st-cloud.live-host { background: radial-gradient(120% 120% at 10% 0%, #10414a, #0b1d33 55%, #070d1c); }
+.wc-host { min-height: 100vh; display: flex; flex-direction: column; padding: 28px 36px 22px; gap: 16px; color: #fff; }
+.wc-top { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+.wc-prompt small { text-transform: uppercase; letter-spacing: 0.12em; color: #7fd8e0; font-weight: 700; }
+.wc-prompt h1 { margin: 6px 0 0; color: #fff; font-size: clamp(1.6rem, 3.4vw, 2.8rem); line-height: 1.15; max-width: 900px; }
+.wc-join { display: flex; gap: 14px; align-items: center; text-align: right; }
+.wc-join small { color: rgba(255, 255, 255, 0.7); }
+.wc-pin { font-size: 2.6rem; font-weight: 900; letter-spacing: 0.12em; color: #ffd36b; font-variant-numeric: tabular-nums; }
+.lh-qr.small svg { width: 120px; height: 120px; display: block; }
+.wc-cloud { flex: 1; display: flex; flex-wrap: wrap; justify-content: center; align-content: center; align-items: center; gap: 6px 22px; padding: 10px 4%; }
+.wc-word { background: none; border: 0; padding: 0 2px; cursor: pointer; line-height: 1.05; font-family: inherit; transition: font-size 0.8s cubic-bezier(.2,.9,.3,1.2), opacity 0.2s; text-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.wc-word:hover { opacity: 0.6; text-decoration: line-through; }
+.wc-word.new { animation: wcPop 0.8s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes wcPop { from { opacity: 0; transform: scale(0.2) rotate(-8deg); } }
+.wc-empty { text-align: center; color: rgba(255, 255, 255, 0.6); }
+.wc-empty span { font-size: 6rem; display: block; animation: floatY 3s ease-in-out infinite; }
+.wc-bottom { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wc-stats { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; font-weight: 700; color: rgba(255, 255, 255, 0.88); }
+.wc-stats .muted { color: rgba(255, 255, 255, 0.5); font-weight: 400; }
+.st-cloud.closed .wc-cloud { animation: wcGlow 3s ease-in-out infinite alternate; }
+@keyframes wcGlow { to { filter: drop-shadow(0 0 18px rgba(127, 216, 224, 0.35)); } }
+.st-cloud.live-play { background: radial-gradient(120% 120% at 10% 0%, #10414a, #0b1d33 60%, #070d1c); }
+.wc-form { display: flex; flex-direction: column; gap: 12px; padding: 20px; max-width: 480px; margin: 0 auto; width: 100%; }
+.wc-input { font-size: 1.3rem; padding: 14px 16px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.08); color: #fff; }
+.wc-input:focus { outline: none; border-color: #7fd8e0; background: rgba(255, 255, 255, 0.14); }
+.wc-mine { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 10px 0; }
+.wc-mine span { padding: 8px 14px; border-radius: 99px; background: rgba(255, 255, 255, 0.14); font-weight: 700; font-size: 1.1rem; animation: wcPop 0.6s cubic-bezier(.3,1.6,.5,1) both; }
+@media (max-width: 760px) { .wc-top { flex-direction: column; } .wc-host { padding: 18px; } }

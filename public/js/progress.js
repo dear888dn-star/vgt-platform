@@ -60,7 +60,7 @@ export async function loadGame({ fresh = false } = {}) {
 
 const localXp = () => {
   const g = computeGame({ progress: state });
-  return g.bySource.topics + g.bySource.review + g.bySource.streak;
+  return g.bySource.topics + g.bySource.review + g.bySource.streak + g.bySource.geo;
 };
 const otherXp = () => (evidenceCache ? computeGame({ ...evidenceCache, progress: {} }).xp - computeGame({ progress: {} }).xp : 0);
 
@@ -121,6 +121,17 @@ export function updateSrs(fn) {
 }
 
 export const progressState = () => state;
+
+/** Geo-sayohat o'yini natijasi: eng yaxshi ball, o'yinlar soni, oxirgi natijalar. */
+export function recordGeo(score) {
+  trackXp(() => {
+    const g = (state.geo ||= { best: 0, plays: 0, history: [] });
+    g.best = Math.max(g.best || 0, score);
+    g.plays = (g.plays || 0) + 1;
+    g.history = [{ score, at: new Date().toISOString().slice(0, 10) }, ...(g.history || [])].slice(0, 10);
+  });
+  persist();
+}
 
 // Internet qaytganda oflayn paytdagi o'zgarishlarni serverga yuboramiz.
 window.addEventListener("online", () => state && session.user && persist());
