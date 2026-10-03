@@ -56,10 +56,12 @@ async function request(method, path, data, { raw = false } = {}) {
   }
   if (!res.ok) {
     let message = `Xatolik (${res.status})`;
+    let payload = null;
     try {
-      message = (await res.json()).error || message;
+      payload = await res.json();
+      message = payload.error || message;
     } catch {}
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: res.status, data: payload });
   }
   return raw ? res : res.json();
 }

@@ -54,18 +54,29 @@ export function renderForgot(el) {
       const fd = new FormData(form);
       err.replaceChildren();
       if (fd.get("newPassword") !== fd.get("newPassword2")) return err.replaceChildren(h("div", { class: "alert alert-error" }, "Parollar mos kelmadi"));
-      const btn = form.querySelector("button");
-      btn.disabled = true;
-      try {
-        const res = await api.post("auth/reset", { email: fd.get("email"), teacherCode: fd.get("teacherCode"), newPassword: fd.get("newPassword") });
-        session.set(res.token, res.user);
-        toast("Parol yangilandi. Xush kelibsiz!", "ok");
-        afterLogin();
-      } catch (ex) {
-        err.replaceChildren(h("div", { class: "alert alert-error" }, ex.message));
-      } finally {
-        btn.disabled = false;
-      }
+      const btn = form.querySelector("button[type=submit]");
+      const send = async (as) => {
+        btn.disabled = true;
+        try {
+          const res = await api.post("auth/reset", { email: fd.get("email"), teacherCode: fd.get("teacherCode"), newPassword: fd.get("newPassword"), as });
+          session.set(res.token, res.user);
+          toast(as === "teacher" ? "Profil o'qituvchi profiliga aylantirildi, parol yangilandi!" : "Parol yangilandi. Xush kelibsiz!", "ok");
+          afterLogin();
+        } catch (ex) {
+          err.replaceChildren(
+            ex.data?.needsChoice
+              ? h("div", { class: "alert alert-warn stack" },
+                  h("div", {}, h("b", {}, `${ex.data.name || fd.get("email")}: `), ex.message),
+                  h("div", { class: "row wrap" },
+                    h("button", { type: "button", class: "btn", onclick: () => send("teacher") }, "👩‍🏫 O'qituvchi profiliga aylantirish"),
+                    h("button", { type: "button", class: "btn ghost", onclick: () => send("student") }, "🎓 Faqat parolni yangilash")))
+              : h("div", { class: "alert alert-error" }, ex.message)
+          );
+        } finally {
+          btn.disabled = false;
+        }
+      };
+      await send();
     } },
     field("Email", { name: "email", type: "email", required: true, autocomplete: "email" }),
     field("O'qituvchi kodi", { name: "teacherCode", type: "password", required: true, autocomplete: "off" }),

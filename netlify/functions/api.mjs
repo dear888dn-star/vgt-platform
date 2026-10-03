@@ -159,7 +159,19 @@ async function resetPassword(req) {
   const ref = await store.get(emailKey(email));
   const user = ref && (await store.get(userKey(ref.id)));
   if (!user) throw new HttpError(404, "Bu email bilan profil topilmadi");
-  if (user.role !== "teacher") throw new HttpError(403, "O'quvchi parolini o'qituvchi panel orqali tiklaydi (O'quvchilar bo'limi → 🔑)");
+  // O'qituvchi kodi to'g'ri — bu email o'quvchi profiliga tegishli bo'lsa (masalan, ro'yxatdan o'tishda
+  // "O'qituvchi" tanlanmagan), uni o'qituvchi profiliga aylantirish yoki faqat parolini yangilash mumkin.
+  if (user.role !== "teacher") {
+    if (!["teacher", "student"].includes(b.as)) {
+      return json({ needsChoice: true, name: user.name, error: "Bu email o'quvchi profiliga tegishli. Uni o'qituvchi profiliga aylantirasizmi yoki faqat parolini yangilaysizmi?" }, 409);
+    }
+    if (b.as === "teacher") {
+      user.role = "teacher";
+      user.promotedAt = new Date().toISOString();
+      delete user.cohort;
+      delete user.cohortSource;
+    }
+  }
   Object.assign(user, await hashPassword(newPassword), { pwdV: (user.pwdV || 0) + 1, pwdResetAt: new Date().toISOString() });
   await store.set(userKey(user.id), user);
   await store.del(rlKey);
