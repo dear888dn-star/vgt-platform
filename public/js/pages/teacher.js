@@ -20,38 +20,114 @@ import { createForm } from "./live.js";
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
 const TYPE_NAMES = { likert: "Likert (1–5)", single: "Bitta variant", multi: "Bir nechta variant", text: "Erkin javob", scale: "Shkala (0–10)", test: "Test (to'g'ri javobli)" };
 
-const TABS = [
-  ["", "📊 Umumiy"],
-  ["diagnostics", "🧪 Kompleks diagnostika"],
-  ["routes", "🗺 Marshrut loyihalari"],
-  ["competencies", "🎯 Kompetensiyalar"],
-  ["results", "📈 So'rovnoma natijalari"],
-  ["experiment", "📐 So'rovnomalar tahlili"],
-  ["builder", "🛠 So'rovnoma konstruktori"],
-  ["slides", "🖥️ Taqdimotlar"],
-  ["videos", "📹 Video darslar"],
-  ["live", "🎮 Jonli viktorina"],
-  ["items", "📉 Test tahlili"],
-  ["voices", "🔊 AI ovozlar"],
-  ["studio", "🎬 Ekskursiyalar"],
-  ["students", "👥 O'quvchilar"],
-  ["trainer", "🎙 Trenajyor natijalari"],
-  ["self-study", "🧩 Mustaqil ishlar"],
+// Panel bo'limlari galereyasi: guruh, belgi, tavsif va (bo'lsa) umumiy ko'rsatkichlardan jonli hisoblagich.
+const GROUPS = [
+  ["research", "🔬 Tadqiqot va tahlil", 200],
+  ["class", "🏫 Sinf va baholash", 160],
+  ["content", "📚 O'quv kontenti", 32],
+  ["live", "🎮 Interaktiv dars", 280],
 ];
+const SECTIONS = [
+  { key: "diagnostics", icon: "🧪", title: "Kompleks diagnostika", group: "research", desc: "T0–T2 bosqichlari, anketa, test, amaliy topshiriqlar va rubrika bo'yicha baholash.", badge: (o) => o.diag.toGrade && [`${o.diag.toGrade} ta baholash kutmoqda`, "warn"], meta: (o) => `${o.diag.complete} ta to'liq varaqa · faol: ${o.diag.activeStage || "yo'q"}` },
+  { key: "experiment", icon: "📐", title: "So'rovnomalar tahlili", group: "research", desc: "TG/NG taqqoslash: t-mezon, χ², Koen d, samaradorlik koeffitsiyenti η." },
+  { key: "results", icon: "📈", title: "So'rovnoma natijalari", group: "research", desc: "Savollar bo'yicha taqsimot, M ± SD, darajalar, filtrlar va CSV.", meta: (o) => `${o.responses} ta javob · ${o.surveys} ta so'rovnoma` },
+  { key: "items", icon: "📉", title: "Test tahlili", group: "research", desc: "Savollar qiyinligi, ajrata olish indeksi, distraktorlar va KR-20 ishonchliligi." },
+  { key: "competencies", icon: "🎯", title: "Kompetensiyalar", group: "research", desc: "Kasb standarti bo'yicha TG/NG kesimidagi kompetensiyalar xaritasi." },
+  { key: "builder", icon: "🛠", title: "So'rovnoma konstruktori", group: "research", desc: "Yangi so'rovnoma va test yaratish, JSON import/eksport." },
+  { key: "students", icon: "👥", title: "O'quvchilar", group: "class", desc: "Ro'yxat, TG/NG guruhlariga ajratish, parolni tiklash.", meta: (o) => `${o.students} nafar · TG ${o.cohorts.experimental} · NG ${o.cohorts.control}` },
+  { key: "self-study", icon: "🧩", title: "Mustaqil ishlar", group: "class", desc: "Topshiriqlarni baholash va izoh yozish.", badge: (o) => o.ungraded && [`${o.ungraded} ta baholanmagan`, "warn"], meta: (o) => `${o.selfStudySubmissions} ta topshiriq` },
+  { key: "routes", icon: "🗺", title: "Marshrut loyihalari", group: "class", desc: "10 mezonli rubrika bilan marshrut laboratoriyasi loyihalarini baholash.", badge: (o) => o.routes.submitted && [`${o.routes.submitted} ta yangi`, "warn"], meta: (o) => `${o.routes.graded} tasi baholangan` },
+  { key: "trainer", icon: "🎙", title: "Trenajyor natijalari", group: "class", desc: "AI baholagan mashg'ulotlar, suhbat yozuvlari va mezonlar.", meta: (o) => `${o.trainerSessions} ta mashg'ulot${o.avgTrainerScore !== null ? ` · o'rtacha ${o.avgTrainerScore}` : ""}` },
+  { key: "studio", icon: "🎬", title: "Ekskursiyalar", group: "class", desc: "O'quvchilar yaratgan virtual ekskursiyalar va AI tahlillari." },
+  { key: "slides", icon: "🖥️", title: "Taqdimotlar", group: "content", desc: "Har bir mavzuga PDF, PowerPoint yoki havola joylash." },
+  { key: "videos", icon: "📹", title: "Video darslar", group: "content", desc: "YouTube/Vimeo havolasi yoki video fayl yuklash." },
+  { key: "voices", icon: "🔊", title: "AI ovozlar", group: "content", desc: "Platforma ovozini tanlash va ovozlarni oldindan tayyorlash." },
+  { key: "live", icon: "🎮", title: "Jonli viktorina va so'z buluti", group: "live", desc: "Safar Live: PIN/QR orqali sinf musobaqasi yoki jonli aqliy hujum." },
+];
+const RECENT_KEY = "vgt.teacher.recent";
+const readRecent = () => {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]").filter((k) => SECTIONS.some((x) => x.key === k));
+  } catch {
+    return [];
+  }
+};
+function rememberSection(key) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify([key, ...readRecent().filter((k) => k !== key)].slice(0, 4)));
+  } catch {}
+}
+const sectionHref = (key) => `#/teacher/${key}`;
 
 export async function render(el, tab = "", param) {
   const content = h("div");
-  mount(
-    el,
-    h("div", { class: "page-head" }, h("h1", {}, "O'qituvchi paneli")),
-    h("nav", { class: "tabs" }, TABS.map(([key, label]) => h("a", { href: `#/teacher${key ? "/" + key : ""}`, class: (tab || "") === key ? "active" : "" }, label))),
-    content
-  );
-  mount(content, loading());
   const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
+  const sec = SECTIONS.find((x) => x.key === tab);
+  if (sec) {
+    rememberSection(sec.key);
+    const g = GROUPS.find(([k]) => k === sec.group);
+    mount(
+      el,
+      h("div", { class: "tp-head", style: { "--hue": g[2] } },
+        h("a", { class: "btn ghost small tp-back", href: "#/teacher" }, "← Barcha bo'limlar"),
+        h("div", { class: "tp-title" }, h("span", { class: "tp-icon" }, sec.icon), h("div", {}, h("small", { class: "muted" }, g[1]), h("h1", {}, sec.title))),
+        h("select", { class: "tp-switch", "aria-label": "Boshqa bo'limga o'tish", onchange: (e) => (location.hash = sectionHref(e.target.value)) },
+          GROUPS.map(([gk, gl]) => h("optgroup", { label: gl }, SECTIONS.filter((x) => x.group === gk).map((x) => h("option", { value: x.key, selected: x.key === sec.key }, `${x.icon} ${x.title}`)))))),
+      content
+    );
+  } else {
+    mount(el, h("div", { class: "page-head" }, h("h1", {}, "O'qituvchi paneli")), content);
+  }
+  mount(content, loading());
   await view(content, param);
+}
+
+/** Bo'limlar galereyasi. o — umumiy ko'rsatkichlar (hisoblagichlar uchun), bo'lmasa null. */
+function gallery(o) {
+  const query = { text: "" };
+  const recent = readRecent();
+  const card = (x, i) => {
+    const g = GROUPS.find(([k]) => k === x.group);
+    const badge = o && x.badge?.(o);
+    return h("a", { class: "tp-card", href: sectionHref(x.key), "data-search": `${x.title} ${x.desc}`.toLowerCase(), style: { "--hue": g[2], "--i": i } },
+      h("span", { class: "tp-card-icon" }, x.icon),
+      h("b", { class: "tp-card-title" }, x.title),
+      h("span", { class: "tp-card-desc" }, x.desc),
+      o && x.meta ? h("small", { class: "tp-card-meta" }, x.meta(o)) : null,
+      badge ? h("span", { class: `tp-card-badge ${badge[1]}` }, badge[0]) : null,
+      h("span", { class: "tp-card-go", "aria-hidden": "true" }, "→"));
+  };
+  let n = 0;
+  const groups = GROUPS.map(([gk, gl, hue]) => h("section", { class: "tp-group", "data-group": gk },
+    h("h2", { class: "tp-group-title", style: { "--hue": hue } }, gl),
+    h("div", { class: "tp-grid" }, SECTIONS.filter((x) => x.group === gk).map((x) => card(x, n++)))));
+  const empty = h("p", { class: "muted hidden" }, "Bunday bo'lim topilmadi.");
+  const search = h("input", { type: "search", class: "tp-search", placeholder: "🔍 Bo'limni qidirish…", oninput: (e) => {
+    query.text = e.target.value.trim().toLowerCase();
+    let any = false;
+    for (const sec of groups) {
+      let shown = 0;
+      sec.querySelectorAll(".tp-card").forEach((c) => {
+        const ok = !query.text || c.dataset.search.includes(query.text);
+        c.classList.toggle("hidden", !ok);
+        shown += ok;
+      });
+      sec.classList.toggle("hidden", !shown);
+      any ||= shown > 0;
+    }
+    empty.classList.toggle("hidden", any);
+  } });
+  return h("div", { class: "tp-gallery" },
+    h("div", { class: "tp-toolbar" },
+      search,
+      recent.length ? h("div", { class: "tp-recent" }, h("span", { class: "muted small" }, "So'nggi:"), recent.map((k) => {
+        const x = SECTIONS.find((s) => s.key === k);
+        return h("a", { class: "chip", href: sectionHref(k) }, `${x.icon} ${x.title}`);
+      })) : null),
+    ...groups,
+    empty);
 }
 
 // ---------------- Umumiy ----------------
@@ -61,6 +137,8 @@ async function overview(el) {
   const card = (icon, value, label, href) => h(href ? "a" : "div", { class: "card stat-card", href }, h("div", { class: "stat-icon" }, icon), h("b", {}, value), h("span", { class: "muted small" }, label));
   mount(
     el,
+    gallery(o),
+    h("h2", { class: "tp-group-title", style: { "--hue": 190 } }, "📊 Umumiy ko'rsatkichlar"),
     !o.aiEnabled && h("div", { class: "alert alert-warn" }, "⚠️ AI kaliti ulanmagan: trenajyor demo-rejimda. Netlify sozlamalarida GEMINI_API_KEY (bepul) yoki ANTHROPIC_API_KEY o'zgaruvchisini qo'shing."),
     h(
       "div",
