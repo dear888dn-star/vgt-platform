@@ -77,9 +77,9 @@ Platforma Cloudflare Workers'da ham ishlaydi — kod bir xil, faqat kirish nuqta
 1. [dash.cloudflare.com](https://dash.cloudflare.com) → **Compute (Workers) → Workers & Pages → Create → Import a repository** → GitHub → `vgt-platform` repozitoriyasini va tarmoqni tanlang.
 2. Build sozlamalari: **Build command:** `npm install`, **Deploy command:** `npx wrangler deploy` (standart). D1 bazasi va KV ombori birinchi deploy paytida avtomatik yaratiladi.
 3. Worker → **Settings → Variables and Secrets** → **Add** (turi: *Secret*): `TEACHER_CODE`, `GEMINI_API_KEY` (va kerak bo'lsa `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GEMINI_MODEL` …). Keyin **Deployments → Retry/Deploy**.
-4. `https://safar-akademiya.<akkaunt>.workers.dev/api/health` ni oching: `blobs: ishlayapti`, `platform: cloudflare` chiqishi kerak.
+4. `https://vgt-platform.<akkaunt>.workers.dev/api/health` ni oching: `blobs: ishlayapti`, `platform: cloudflare` chiqishi kerak.
 5. Eski (Netlify) saytdagi ma'lumotlarni ko'chirish: yangi saytda **`#/migrate`** sahifasini oching, eski sayt manzili va `TEACHER_CODE` ni kiriting (ikkala saytda kod bir xil bo'lishi kerak). Foydalanuvchilar, parollar, diagnostika, so'rovnomalar, natijalar, taqdimotlar, videolar va AI ovozlari ko'chadi; eski saytdagi ma'lumotlar o'chirilmaydi. Uzilib qolsa — qayta bosing, to'xtagan joydan davom etadi.
-6. O'z domeningiz bo'lsa: Worker → **Settings → Domains & Routes → Add → Custom domain**.
+6. Domen: `etourism.uz` va `www.etourism.uz` `wrangler.jsonc` dagi `routes` orqali har deployda avtomatik biriktiriladi (zona shu Cloudflare akkauntida bo'lishi kerak).
 
 **Bepul reja cheklovlari:** kuniga 100 000 API so'rovi (statik fayllar hisobga kirmaydi), har so'rovga 10 ms protsessor vaqti, D1 — 500 MB (faqat JSON yozuvlar uchun yetarli), KV — 1 GB va kuniga 1 000 ta yozish. Protsessor chegarasi sababli AI ovozi MP3 o'rniga **WAV** formatida saqlanadi (kodlash talab qilinmaydi), parollar esa PBKDF2 bilan xeshlanadi (eski scrypt parollar ham ishlaydi va kirishda yangilanadi). **Workers Paid** ($5/oy) rejasida `TTS_FORMAT=mp3` o'zgaruvchisini qo'shsangiz, ovoz fayllari ~6 marta kichik bo'ladi. Ko'p fayl yuklansa, R2 ombori ulash mumkin: `wrangler.jsonc` ga `"r2_buckets": [{ "binding": "FILES" }]` qo'shiladi (R2 ulansa, fayllar KV o'rniga R2 da saqlanadi).
 

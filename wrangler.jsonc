@@ -3,7 +3,7 @@
 // ID yozish shart emas. Maxfiy kalitlar (GEMINI_API_KEY, TEACHER_CODE) Cloudflare panelida kiritiladi.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "safar-akademiya",
+  "name": "vgt-platform",
   "main": "cloudflare/worker.mjs",
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -14,5 +14,12 @@
   },
   "d1_databases": [{ "binding": "DB" }],
   "kv_namespaces": [{ "binding": "BLOBS" }],
+  // O'z domenimiz: deploy paytida Cloudflare DNS yozuvi va HTTPS sertifikatini o'zi yaratadi
+  // (etourism.uz zonasi shu Cloudflare akkauntida bo'lishi kerak). workers.dev manzili ham ishlab turadi.
+  "routes": [
+    { "pattern": "etourism.uz", "custom_domain": true },
+    { "pattern": "www.etourism.uz", "custom_domain": true }
+  ],
+  "workers_dev": true,
   "observability": { "enabled": true }
 }
