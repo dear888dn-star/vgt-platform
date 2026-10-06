@@ -1,6 +1,6 @@
 // Platformaning yagona API funksiyasi: /api/* so'rovlarini marshrutlaydi.
 import { db, getMany } from "../lib/store.mjs";
-import { hashPassword, verifyPassword, createToken, readToken, newId, setGeneratedSecret } from "../lib/auth.mjs";
+import { hashPassword, verifyPassword, needsRehash, createToken, readToken, newId, setGeneratedSecret } from "../lib/auth.mjs";
 import crypto from "node:crypto";
 import { SEED_SURVEYS, SEED_VERSION } from "../lib/seed-surveys.mjs";
 import {
@@ -48,7 +48,7 @@ const emailKey = (email) => `user-email/${email.toLowerCase()}`;
 const userKey = (id) => `user/${id}`;
 
 function publicUser(u) {
-  const { salt, hash, ...rest } = u;
+  const { salt, hash, algo, iter, ...rest } = u;
   return rest;
 }
 
@@ -126,8 +126,14 @@ async function login(req) {
   const email = str(b.email, 120).toLowerCase();
   const ref = await db().get(emailKey(email));
   const user = ref && (await db().get(userKey(ref.id)));
-  if (!user || !(await verifyPassword(String(b.password || ""), user.salt, user.hash))) {
+  const password = String(b.password || "");
+  if (!user || !(await verifyPassword(password, user))) {
     throw new HttpError(401, "Email yoki parol noto'g'ri");
+  }
+  if (needsRehash(user)) {
+    // Eski scrypt xeshini PBKDF2 ga yangilash (parolning o'zi o'zgarmaydi, tokenlar amal qiladi).
+    Object.assign(user, await hashPassword(password));
+    await db().set(userKey(user.id), user);
   }
   return json({ token: createToken(user), user: publicUser(user) });
 }
@@ -205,7 +211,7 @@ async function updateMe(req) {
     user.cohortSource = "self";
   }
   if (b.newPassword) {
-    if (!(await verifyPassword(String(b.password || ""), user.salt, user.hash))) throw new HttpError(400, "Joriy parol noto'g'ri");
+    if (!(await verifyPassword(String(b.password || ""), user))) throw new HttpError(400, "Joriy parol noto'g'ri");
     if (String(b.newPassword).length < 6) throw new HttpError(400, "Yangi parol kamida 6 belgi bo'lsin");
     Object.assign(user, await hashPassword(String(b.newPassword)));
   }
@@ -1193,7 +1199,9 @@ async function ttsSpeak(req) {
 async function ttsAudio(req, key) {
   const data = await db().getBinary(ttsBinKey(key));
   if (!data) throw new HttpError(404, "Audio topilmadi");
-  return new Response(data, { headers: { "content-type": "audio/mpeg", "cache-control": "public, max-age=31536000, immutable" } });
+  const head = new Uint8Array(data, 0, 4);
+  const isWav = head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46; // "RIFF"
+  return new Response(data, { headers: { "content-type": isWav ? "audio/wav" : "audio/mpeg", "cache-control": "public, max-age=31536000, immutable" } });
 }
 
 async function ttsSettings() {
@@ -1711,9 +1719,13 @@ async function myCertificate(req) {
 
 // ---------- Sozlamalar va diagnostika ----------
 
+// Kalit omborda saqlanadi; har daqiqada qayta o'qiladi (ko'chirishdan keyin barcha nusxalar bir xil kalitga o'tadi).
 let secretReady = false;
+let secretAt = 0;
 async function ensureSecret() {
-  if (secretReady || process.env.JWT_SECRET || process.env.VGT_LOCAL_DATA) return;
+  if (process.env.JWT_SECRET || process.env.VGT_LOCAL_DATA) return;
+  if (secretReady && Date.now() - secretAt < 60_000) return;
+  secretAt = Date.now();
   const store = db();
   let meta = await store.get("meta/secret");
   if (!meta?.value) {
@@ -1733,7 +1745,7 @@ function describeError(err) {
 }
 
 async function health() {
-  const checks = { blobs: "tekshirilmoqda", jwtSecret: process.env.JWT_SECRET ? "o'rnatilgan" : "avtomatik (omborda)", teacherCode: process.env.TEACHER_CODE ? "o'rnatilgan" : "o'rnatilmagan", ai: provider() ? `${provider()} (${modelName()})` : "demo-rejim", node: process.version };
+  const checks = { blobs: "tekshirilmoqda", jwtSecret: process.env.JWT_SECRET ? "o'rnatilgan" : "avtomatik (omborda)", teacherCode: process.env.TEACHER_CODE ? "o'rnatilgan" : "o'rnatilmagan", ai: provider() ? `${provider()} (${modelName()})` : "demo-rejim", platform: process.env.PLATFORM || "netlify", node: process.version };
   checks.tts = ttsEnabled() ? `gemini (${(await ttsModels().catch(() => []))[0] || "model topilmadi"})` : "o'chiq (brauzer ovozi)";
   try {
     await db().set("meta/health", { at: new Date().toISOString() });
@@ -2082,12 +2094,80 @@ async function knownColleges() {
   }
 }
 
+// ---------- Ma'lumotlarni boshqa xostingga ko'chirish (Netlify → Cloudflare) ----------
+// Eski sayt: GET /api/migrate/export (sahifalab, fayllar base64), yangi sayt: POST /api/migrate/import.
+// Ikkalasi ham o'qituvchi kodi (TEACHER_CODE, x-teacher-code sarlavhasi) bilan himoyalangan.
+
+const MIGRATE_SKIP = /^(live\/|liveplayer\/|liveans\/|ttsq\/|ratelimit\/)/;
+const MIGRATE_BIN = /^(ttsbin|slidebin|mediabin)\//;
+const MIGRATE_PAGE_BYTES = 6 * 1024 * 1024;
+const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, x-teacher-code", "access-control-max-age": "86400" };
+const withCors = (res) => {
+  for (const [k, v] of Object.entries(CORS)) res.headers.set(k, v);
+  return res;
+};
+
+function requireMigrationCode(req) {
+  const code = process.env.TEACHER_CODE;
+  if (!code) throw new HttpError(403, "TEACHER_CODE o'rnatilmagan");
+  const given = Buffer.from(String(req.headers.get("x-teacher-code") || ""));
+  const want = Buffer.from(code);
+  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) throw new HttpError(403, "O'qituvchi kodi noto'g'ri");
+}
+
+async function migrateExport(req) {
+  requireMigrationCode(req);
+  const url = new URL(req.url);
+  const after = url.searchParams.get("after") || "";
+  const keys = (await db().list("")).filter((k) => !MIGRATE_SKIP.test(k)).sort();
+  const start = after ? keys.findIndex((k) => k > after) : 0;
+  const items = [];
+  let bytes = 0;
+  let i = start < 0 ? keys.length : start;
+  for (; i < keys.length && items.length < 300 && bytes < MIGRATE_PAGE_BYTES; i++) {
+    const k = keys[i];
+    if (MIGRATE_BIN.test(k)) {
+      const data = await db().getBinary(k);
+      if (!data) continue;
+      const b64 = Buffer.from(data).toString("base64");
+      bytes += b64.length;
+      items.push({ k, b64 });
+    } else {
+      const v = await db().get(k);
+      if (v === null) continue;
+      const text = JSON.stringify(v);
+      bytes += text.length;
+      items.push({ k, v });
+    }
+  }
+  return json({ items, next: i < keys.length ? keys[i - 1] ?? "" : null, done: i, total: keys.length });
+}
+
+async function migrateImport(req) {
+  requireMigrationCode(req);
+  const b = await body(req);
+  const items = Array.isArray(b.items) ? b.items : [];
+  let n = 0;
+  for (const it of items) {
+    if (typeof it?.k !== "string" || !it.k || it.k.length > 500 || MIGRATE_SKIP.test(it.k)) continue;
+    if (typeof it.b64 === "string") await db().setBinary(it.k, Buffer.from(it.b64, "base64"));
+    else if (it.v !== undefined) await db().set(it.k, it.v);
+    else continue;
+    n++;
+  }
+  publicCache = { at: 0, data: null };
+  secretReady = false;
+  return json({ imported: n });
+}
+
 // ---------- Router ----------
 
 const routes = [
   ["POST", /^auth\/register$/, register],
   ["POST", /^auth\/login$/, login],
   ["POST", /^auth\/reset$/, resetPassword],
+  ["GET", /^migrate\/export$/, async (req) => withCors(await migrateExport(req))],
+  ["POST", /^migrate\/import$/, migrateImport],
   ["GET", /^me$/, async (req) => json(publicUser(await requireUser(req)))],
   ["PUT", /^me$/, updateMe],
   ["GET", /^health$/, health],
@@ -2187,15 +2267,16 @@ const routes = [
 
 export default async function handler(req) {
   const path = new URL(req.url).pathname.replace(/^\/(\.netlify\/functions\/api|api)\/?/, "").replace(/\/$/, "");
+  if (req.method === "OPTIONS" && path.startsWith("migrate/")) return new Response(null, { status: 204, headers: CORS });
   try {
-    if (path !== "health") await ensureSecret();
+    if (path !== "health" && !path.startsWith("migrate/")) await ensureSecret();
     for (const [method, pattern, fn] of routes) {
       const m = path.match(pattern);
       if (m && req.method === method) return await fn(req, ...m.slice(1).map(decodeURIComponent));
     }
     throw new HttpError(404, "Topilmadi");
   } catch (err) {
-    if (err instanceof HttpError) return json({ error: err.message }, err.status);
+    if (err instanceof HttpError) return path.startsWith("migrate/") ? withCors(json({ error: err.message }, err.status)) : json({ error: err.message }, err.status);
     console.error(err);
     return json({ error: describeError(err) }, 500);
   }

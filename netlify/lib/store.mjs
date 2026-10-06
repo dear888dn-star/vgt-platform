@@ -70,6 +70,10 @@ function blobStore() {
 }
 
 let instance;
+/** Boshqa platformada (Cloudflare) omborni tashqaridan ulash. */
+export function useStore(store) {
+  instance = store;
+}
 export function db() {
   if (!instance) {
     const localDir = process.env.VGT_LOCAL_DATA;
@@ -80,6 +84,7 @@ export function db() {
 
 export async function getMany(prefix) {
   const store = db();
+  if (store.getAll) return store.getAll(prefix);
   const keys = await store.list(prefix);
   const items = await Promise.all(keys.map((k) => store.get(k)));
   return items.filter(Boolean);

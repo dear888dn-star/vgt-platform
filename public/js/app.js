@@ -25,6 +25,7 @@ import * as media from "./pages/media.js";
 import * as studio from "./pages/studio.js";
 import * as live from "./pages/live.js";
 import * as geo from "./pages/geo.js";
+import * as migrate from "./pages/migrate.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -48,6 +49,7 @@ const routes = [
   [/^\/review$/, review.render],
   [/^\/tour$/, tour.render],
   [/^\/geo$/, geo.render],
+  [/^\/migrate$/, migrate.render],
   [/^\/media$/, media.render],
   [/^\/live$/, live.renderJoin],
   [/^\/live\/play\/(\d{6})$/, live.renderPlay],

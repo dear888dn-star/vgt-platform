@@ -1,0 +1,15 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+
+/vendor/pdfjs/*
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=604800
+
+/vendor/qrcode/*
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=604800
+
+/sw.js
+  Cache-Control: no-cache

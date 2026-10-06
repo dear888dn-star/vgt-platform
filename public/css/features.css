@@ -382,3 +382,10 @@
 @keyframes archDraw { to { stroke-dashoffset: 0; } }
 .arch-merge { border-left: 4px solid var(--primary); }
 @media (max-width: 860px) { .arch-hero { grid-template-columns: 1fr; } .arch-kpis { grid-template-columns: repeat(2, 1fr); } }
+
+/* ===== Ma'lumotlarni ko'chirish ===== */
+.mg-card { max-width: 640px; }
+.mg-bar { height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.mg-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.4s ease; }
+.mg-log { max-height: 180px; overflow: auto; font-size: 0.78rem; color: var(--muted); margin: 0; padding-left: 1.2em; }
+.err-text { color: var(--err); font-weight: 600; }
