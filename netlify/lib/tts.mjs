@@ -21,12 +21,29 @@ export const VOICES = [
 ];
 const VOICE_IDS = new Set(VOICES.map((v) => v.id));
 
+// Uslub — "rejissyor izohi" sifatida beriladi va faqat TRANSCRIPT qismi o'qiladi (Gemini TTS tavsiya etgan tuzilma).
+// Avval ko'rsatma matnning boshida turardi va model ba'zan uni ham ("Say the following line…") o'qib yuborardi.
 export const STYLES = {
-  narrator: "Read the following Uzbek text aloud in natural, fluent Uzbek language (O'zbek tili, Latin script) with correct Uzbek pronunciation, as a warm and clear teacher narrating a lesson. Do not translate:",
-  guide: "Read the following Uzbek text aloud in natural, fluent Uzbek language (O'zbek tili) with correct Uzbek pronunciation, as an enthusiastic professional tour guide. Do not translate:",
-  tourist: "Say the following line in Uzbek exactly as written, naturally and expressively, as a tourist talking to a guide. Keep foreign words as they are:",
-  english: "Say the following in clear, natural English:",
+  narrator: "A warm, clear Uzbek teacher narrating a lesson. Natural, fluent Uzbek (Latin script) with correct Uzbek pronunciation; do not translate.",
+  guide: "An enthusiastic professional Uzbek tour guide. Natural, fluent Uzbek with correct pronunciation; do not translate.",
+  tourist: "A tourist talking to a tour guide, natural and expressive. Uzbek pronunciation; keep foreign words and names as they are; do not translate.",
+  english: "A tourist speaking clear, natural English.",
 };
+
+/** Ovoz uchun so'rov: izohlar o'qilmaydi, faqat TRANSCRIPT ostidagi matn aytiladi. */
+function buildPrompt(style, transcript, note = "") {
+  return [
+    "Generate speech for the TRANSCRIPT below.",
+    "### DIRECTOR'S NOTES (instructions only — never speak them)",
+    `Style: ${STYLES[style] || STYLES.narrator}`,
+    note,
+    "Speak ONLY the words of the transcript, exactly as written. Do not add, announce or describe anything, and do not read these notes, headings or speaker labels.",
+    "### TRANSCRIPT",
+    transcript,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 export const ttsEnabled = () => Boolean(process.env.GEMINI_API_KEY);
 
@@ -53,7 +70,8 @@ export async function ttsModels() {
 }
 
 export function ttsKey(text, voice, style) {
-  return crypto.createHash("sha256").update(`${voice}|${style}|${text}`).digest("hex").slice(0, 40);
+  // v2: so'rov tuzilmasi o'zgardi — eski (ko'rsatma o'qilgan bo'lishi mumkin) yozuvlar qayta yaratiladi.
+  return crypto.createHash("sha256").update(`v2|${voice}|${style}|${text}`).digest("hex").slice(0, 40);
 }
 
 /** WAV (PCM 16-bit, mono) — kodlashsiz, protsessor vaqtini talab qilmaydi (Cloudflare bepul rejasi uchun). */
@@ -151,14 +169,14 @@ export async function synthesize(text, { voice = "Kore", style = "narrator", dia
   if (dialogue?.length) {
     const { slots, lines } = dialogueScript(dialogue);
     if (slots.length < 2) {
-      prompt = `${STYLES[style] || STYLES.narrator}\n\n${lines.map((l) => l.text).join(" ")}`;
+      prompt = buildPrompt(style, lines.map((l) => l.text).join(" "));
       speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: slots[0].voice } } };
     } else {
-      prompt = `${STYLES[style] || STYLES.narrator}\nThis is a conversation; each line starts with a speaker label (${slots.map((x) => x.label).join(", ")}). Do not read the labels aloud.\n\n${lines.map((l) => `${l.label}: ${l.text}`).join("\n")}`;
+      prompt = buildPrompt(style, lines.map((l) => `${l.label}: ${l.text}`).join("\n"), `This is a conversation between ${slots.map((x) => x.label).join(" and ")}; each transcript line starts with the speaker label.`);
       speechConfig = { multiSpeakerVoiceConfig: { speakerVoiceConfigs: slots.map((x) => ({ speaker: x.label, voiceConfig: { prebuiltVoiceConfig: { voiceName: x.voice } } })) } };
     }
   } else {
-    prompt = `${STYLES[style] || STYLES.narrator}\n\n${text}`;
+    prompt = buildPrompt(style, text);
     speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE_IDS.has(voice) ? voice : "Kore" } } };
   }
   let last = null;

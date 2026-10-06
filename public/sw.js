@@ -1,7 +1,7 @@
 // Safar akademiya — service worker: ilovani o'rnatish va internetsiz rejim.
 // Statik fayllar (sahifa, uslublar, skriptlar, mavzu rasmlari) keshdan tez ochiladi va fonda yangilanadi.
 // API so'rovlari keshlanmaydi (taqdimot/video bo'laklari va AI ovoz fayllaridan tashqari — ular o'zgarmaydi).
-const VERSION = "safar-v10";
+const VERSION = "safar-v11";
 const SHELL = ["/", "/index.html", "/css/style.css", "/css/motion.css", "/css/features.css", "/css/media.css", "/css/live.css", "/js/app.js", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
