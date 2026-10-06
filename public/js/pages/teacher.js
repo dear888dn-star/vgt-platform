@@ -44,6 +44,7 @@ const SECTIONS = [
   { key: "slides", icon: "🖥️", title: "Taqdimotlar", group: "content", desc: "Har bir mavzuga PDF, PowerPoint yoki havola joylash." },
   { key: "videos", icon: "📹", title: "Video darslar", group: "content", desc: "YouTube/Vimeo havolasi yoki video fayl yuklash." },
   { key: "voices", icon: "🔊", title: "AI ovozlar", group: "content", desc: "Platforma ovozini tanlash va ovozlarni oldindan tayyorlash." },
+  { key: "backup", icon: "💾", title: "Zaxira nusxa", group: "content", desc: "Barcha ma'lumotlarni bitta faylga yuklab olish va kerak bo'lsa qayta tiklash." },
   { key: "live", icon: "🎮", title: "Jonli viktorina va so'z buluti", group: "live", desc: "Safar Live: PIN/QR orqali sinf musobaqasi yoki jonli aqliy hujum." },
 ];
 const RECENT_KEY = "vgt.teacher.recent";
@@ -63,7 +64,7 @@ const sectionHref = (key) => `#/teacher/${key}`;
 
 export async function render(el, tab = "", param) {
   const content = h("div");
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, backup: backupView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   const sec = SECTIONS.find((x) => x.key === tab);
@@ -2026,4 +2027,103 @@ function archTrend(T) {
   const chart = h("div", { class: "chart" });
   chart.innerHTML = svg;
   return h("div", {}, chart, h("div", { class: "legend" }, series.map(([name, , , color, dash]) => h("span", {}, h("i", { style: { background: color, opacity: dash ? 0.55 : 1 } }), name))));
+}
+
+// ---------------- Zaxira nusxa ----------------
+
+async function backupView(el) {
+  const withFiles = h("input", { type: "checkbox" });
+  const bar = h("div", { class: "mg-bar" }, h("i"));
+  const status = h("div", { class: "muted small" });
+  const setP = (pct, text) => {
+    bar.firstChild.style.width = `${pct}%`;
+    status.textContent = text;
+  };
+  const mb = (n) => `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
+
+  const dl = h("button", { class: "btn lg", onclick: async () => {
+    dl.disabled = true;
+    try {
+      const items = [];
+      let after = "";
+      let bytes = 0;
+      for (;;) {
+        const d = await api.get(`migrate/export?files=${withFiles.checked ? 1 : 0}&after=${encodeURIComponent(after)}`);
+        items.push(...d.items);
+        bytes += d.items.reduce((n, it) => n + (it.b64 ? it.b64.length : JSON.stringify(it.v).length), 0);
+        setP(d.total ? (d.done / d.total) * 100 : 100, `${items.length} ta yozuv · ${mb(bytes)}`);
+        if (d.next === null) break;
+        after = d.next;
+      }
+      const date = new Date().toISOString().slice(0, 10);
+      const file = new Blob([JSON.stringify({ format: "safar-akademiya-backup", version: 1, createdAt: new Date().toISOString(), site: location.host, files: withFiles.checked, items })], { type: "application/json" });
+      const a = h("a", { href: URL.createObjectURL(file), download: `safar-akademiya-zaxira-${date}.json` });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setP(100, `✅ Tayyor: ${items.length} ta yozuv, ${mb(file.size)}. Faylni kompyuter va Google Drive'da saqlang.`);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+    dl.disabled = false;
+  } }, "⬇ Zaxira nusxani yuklab olish");
+
+  const code = h("input", { type: "password", autocomplete: "off", placeholder: "TEACHER_CODE" });
+  const fileIn = h("input", { type: "file", accept: ".json,application/json" });
+  const restore = h("button", { class: "btn ghost", onclick: async () => {
+    const f = fileIn.files[0];
+    if (!f) return toast("Zaxira faylini tanlang", "warn");
+    if (!code.value) return toast("O'qituvchi kodini kiriting", "warn");
+    let data;
+    try {
+      data = JSON.parse(await f.text());
+    } catch {
+      return toast("Fayl o'qilmadi — bu zaxira nusxa fayli emas", "error");
+    }
+    if (data?.format !== "safar-akademiya-backup" || !Array.isArray(data.items)) return toast("Bu Safar akademiya zaxira fayli emas", "error");
+    if (!(await confirmDialog(`${data.items.length} ta yozuv (${new Date(data.createdAt).toLocaleString("uz-UZ")}) tiklansinmi? Fayldagi yozuvlar hozirgilarining ustiga yoziladi; faylda yo'q yozuvlar o'zgarmaydi.`))) return;
+    restore.disabled = true;
+    try {
+      let batch = [];
+      let size = 0;
+      let done = 0;
+      const send = async () => {
+        if (!batch.length) return;
+        const r = await fetch("/api/migrate/import", { method: "POST", headers: { "content-type": "application/json", "x-teacher-code": code.value }, body: JSON.stringify({ items: batch }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || `Xatolik (${r.status})`);
+        done += batch.length;
+        setP((done / data.items.length) * 100, `Tiklanmoqda: ${done} / ${data.items.length}`);
+        batch = [];
+        size = 0;
+      };
+      for (const it of data.items) {
+        batch.push(it);
+        size += it.b64 ? it.b64.length : JSON.stringify(it.v).length;
+        if (batch.length >= 200 || size > 5 * 1024 * 1024) await send();
+      }
+      await send();
+      setP(100, `✅ ${done} ta yozuv tiklandi.`);
+      toast("Zaxira nusxadan tiklandi", "ok");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+    restore.disabled = false;
+  } }, "♻️ Tiklash");
+
+  mount(el,
+    h("div", { class: "card stack" },
+      h("h3", {}, "⬇ Zaxira nusxa olish"),
+      h("p", {}, "Platformadagi barcha ma'lumotlar — o'quvchilar va o'qituvchilar profillari (parollar shifrlangan holda), diagnostika, so'rovnomalar, test va trenajyor natijalari, mustaqil ishlar, marshrut loyihalari, ekskursiyalar, sozlamalar — bitta JSON faylga yuklanadi."),
+      h("label", { class: "check-row" }, withFiles, " Fayllarni ham qo'shish (taqdimotlar, videolar, AI ovozlari) — fayl ancha katta bo'ladi"),
+      h("div", { class: "row wrap" }, dl),
+      bar,
+      status,
+      h("div", { class: "alert alert-info small" }, "💡 Oyiga bir marta yuklab olib, kompyuter va Google Drive'da saqlash tavsiya etiladi. Faylda shaxsiy ma'lumotlar bor — uni boshqalarga bermang.")),
+    h("div", { class: "card stack" },
+      h("h3", {}, "♻️ Zaxira nusxadan tiklash"),
+      h("p", { class: "muted small" }, "Yangi saytga ko'chishda yoki ma'lumotlar yo'qolganda ishlatiladi. Xavfsizlik uchun o'qituvchi kodi (TEACHER_CODE) talab qilinadi."),
+      h("label", { class: "field" }, h("span", {}, "Zaxira fayli (.json)"), fileIn),
+      h("label", { class: "field" }, h("span", {}, "O'qituvchi kodi"), code),
+      h("div", { class: "row wrap" }, restore)));
 }

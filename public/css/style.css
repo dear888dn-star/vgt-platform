@@ -597,3 +597,10 @@ a.chip { text-decoration: none; }
   .nav a { padding: 8px 9px; font-size: 0.9rem; }
   .nav-user-name { display: none; }
 }
+
+/* Telefonda uzun tugmalar va bo'lim tanlagichlar ekrandan chiqib ketmasin */
+@media (max-width: 640px) {
+  .btn { white-space: normal; text-align: center; max-width: 100%; }
+  .segmented { flex-wrap: wrap; max-width: 100%; flex-shrink: 1; }
+  .segmented .seg { flex: 1 1 auto; }
+}

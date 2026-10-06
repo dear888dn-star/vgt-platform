@@ -91,6 +91,14 @@ function renderNav() {
   );
 }
 
+/** Brauzer yorlig'i va tarix uchun sahifa nomi: birinchi sarlavhadan (bosh sahifada — sayt nomi). */
+function setTitle(path) {
+  const base = "Safar akademiya";
+  const h1 = path === "/" || path === "" ? null : main.querySelector("h1, h2");
+  const t = h1?.textContent.replace(/\s+/g, " ").trim().replace(/^[^\p{L}\p{N}]+/u, "").slice(0, 70);
+  document.title = t ? `${t} — ${base}` : `${base} — Turizmda raqamli texnologiyalar`;
+}
+
 async function route() {
   if (cleanup) {
     try { cleanup(); } catch {}
@@ -126,6 +134,7 @@ async function route() {
       mount(main, errorBox(e));
     }
     main.focus({ preventScroll: true });
+    setTitle(path);
     return;
   }
   mount(main, h("div", { class: "empty" }, h("div", { class: "empty-icon" }, "🧭"), h("h3", {}, "Sahifa topilmadi"), h("a", { href: "#/", class: "btn" }, "Bosh sahifaga")));

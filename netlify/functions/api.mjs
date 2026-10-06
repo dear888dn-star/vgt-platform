@@ -121,15 +121,31 @@ async function register(req) {
   return json({ token: createToken(user), user: publicUser(user) }, 201);
 }
 
+const LOGIN_LIMIT = 10;
+const loginRlKey = (email) => `ratelimit/login/${crypto.createHash("sha256").update(String(email).toLowerCase()).digest("hex").slice(0, 32)}`;
+const LOGIN_WINDOW_MS = 15 * 60_000;
+
 async function login(req) {
   const b = await body(req);
   const email = str(b.email, 120).toLowerCase();
   const ref = await db().get(emailKey(email));
   const user = ref && (await db().get(userKey(ref.id)));
   const password = String(b.password || "");
-  if (!user || !(await verifyPassword(password, user))) {
-    throw new HttpError(401, "Email yoki parol noto'g'ri");
+  // Parolni terib topishdan himoya: bitta email uchun 15 daqiqada 10 ta noto'g'ri urinish.
+  const rlKey = loginRlKey(email);
+  const rl = (await db().get(rlKey)) || { count: 0, since: Date.now() };
+  if (Date.now() - rl.since > LOGIN_WINDOW_MS) Object.assign(rl, { count: 0, since: Date.now() });
+  if (rl.count >= LOGIN_LIMIT) {
+    const mins = Math.max(1, Math.ceil((rl.since + LOGIN_WINDOW_MS - Date.now()) / 60_000));
+    throw new HttpError(429, `Juda ko'p noto'g'ri urinish. ${mins} daqiqadan keyin qayta urinib ko'ring yoki “Parolni unutdingizmi?” orqali tiklang.`);
   }
+  if (!user || !(await verifyPassword(password, user))) {
+    rl.count++;
+    await db().set(rlKey, rl);
+    if (rl.count >= LOGIN_LIMIT) throw new HttpError(429, "Juda ko'p noto'g'ri urinish. 15 daqiqadan keyin qayta urinib ko'ring yoki “Parolni unutdingizmi?” orqali tiklang.");
+    throw new HttpError(401, rl.count >= LOGIN_LIMIT - 3 ? `Email yoki parol noto'g'ri (yana ${LOGIN_LIMIT - rl.count} ta urinish qoldi)` : "Email yoki parol noto'g'ri");
+  }
+  if (rl.count) await db().del(rlKey);
   if (needsRehash(user)) {
     // Eski scrypt xeshini PBKDF2 ga yangilash (parolning o'zi o'zgarmaydi, tokenlar amal qiladi).
     Object.assign(user, await hashPassword(password));
@@ -182,6 +198,7 @@ async function resetPassword(req) {
   Object.assign(user, await hashPassword(newPassword), { pwdV: (user.pwdV || 0) + 1, pwdResetAt: new Date().toISOString() });
   await store.set(userKey(user.id), user);
   await store.del(rlKey);
+  await store.del(loginRlKey(user.email));
   return json({ token: createToken(user), user: publicUser(user) });
 }
 
@@ -195,6 +212,7 @@ async function adminResetPassword(req, id) {
   const password = Array.from(crypto.randomBytes(8), (x) => alphabet[x % alphabet.length]).join("");
   Object.assign(user, await hashPassword(password), { pwdV: (user.pwdV || 0) + 1, pwdResetAt: new Date().toISOString() });
   await db().set(userKey(id), user);
+  await db().del(loginRlKey(user.email));
   return json({ password });
 }
 
@@ -1791,7 +1809,7 @@ async function listSlides() {
 
 async function getSlides(req, topicId) {
   const meta = await db().get(slideKey(topicId));
-  if (!meta) throw new HttpError(404, "Bu mavzu uchun taqdimot joylanmagan");
+  if (!meta) return json(null); // taqdimot yo'q — oddiy holat (brauzer konsolida 404 xatolari chiqmasin)
   const { by, ...rest } = meta;
   return json(rest);
 }
@@ -2116,10 +2134,13 @@ function requireMigrationCode(req) {
 }
 
 async function migrateExport(req) {
-  requireMigrationCode(req);
+  // Ko'chirish — o'qituvchi kodi bilan; zaxira nusxa (panel) — tizimga kirgan o'qituvchi tokeni bilan.
+  if (req.headers.get("x-teacher-code")) requireMigrationCode(req);
+  else await requireTeacher(req);
   const url = new URL(req.url);
   const after = url.searchParams.get("after") || "";
-  const keys = (await db().list("")).filter((k) => !MIGRATE_SKIP.test(k)).sort();
+  const withFiles = url.searchParams.get("files") !== "0";
+  const keys = (await db().list("")).filter((k) => !MIGRATE_SKIP.test(k) && (withFiles || !MIGRATE_BIN.test(k))).sort();
   const start = after ? keys.findIndex((k) => k > after) : 0;
   const items = [];
   let bytes = 0;
