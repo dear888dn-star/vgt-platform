@@ -4,8 +4,8 @@
 
 const SCHEMA = "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, val TEXT, bin INTEGER NOT NULL DEFAULT 0, size INTEGER, updated INTEGER)";
 
-/** Prefiks bo'yicha diapazon: [prefix, prefix + '￿'). */
-const range = (prefix) => [prefix, `${prefix}￿`];
+/** Prefiks bo'yicha diapazon: [prefix, prefix + '\uffff'). */
+const range = (prefix) => [prefix, `${prefix}\uffff`];
 
 export function cloudflareStore(env) {
   const { DB, BLOBS, FILES } = env;
