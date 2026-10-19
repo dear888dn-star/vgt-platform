@@ -573,6 +573,133 @@ async function mySelfStudy(req) {
   return json(await getMany(`selfstudy/${user.id}/`));
 }
 
+// ---------- Mustaqil ish: AI tahlili ----------
+// Topshiriq yuborilganda AI qisqa tahlil beradi: 2–5 baho, kuchli tomonlar, kamchiliklar, tavsiyalar.
+// O'qituvchi bahosi alohida qoladi; milestone PDF hisobotiga ikkalasi ham kiradi.
+
+const SELF_REVIEW_SCHEMA = {
+  type: "object",
+  properties: {
+    grade: { type: "integer", minimum: 2, maximum: 5 },
+    summary: { type: "string" },
+    strengths: { type: "array", items: { type: "string" } },
+    improvements: { type: "array", items: { type: "string" } },
+    recommendations: { type: "array", items: { type: "string" } },
+  },
+  required: ["grade", "summary", "strengths", "improvements", "recommendations"],
+};
+
+const findSelfTask = (taskId) => {
+  for (const t of TOPICS) {
+    const task = (t.selfStudy || []).find((x) => x.id === taskId);
+    if (task) return { task, topic: t };
+  }
+  return null;
+};
+
+function demoSelfReview(item) {
+  const words = (item.text || "").trim().split(/\s+/).filter(Boolean).length;
+  const grade = words >= 250 ? 5 : words >= 120 ? 4 : words >= 40 ? 3 : 2;
+  return {
+    grade,
+    summary: `Javob hajmi: ${words} so‘z${item.link ? ", havola biriktirilgan" : ""}. Bu taxminiy (avtomatik) baho — AI xizmati ulanmagan.`,
+    strengths: words >= 120 ? ["Javob yetarli hajmda yozilgan"] : [],
+    improvements: words < 120 ? ["Javobni kengroq yoritib, misollar keltiring"] : [],
+    recommendations: ["Mavzudagi tayanch tushunchalardan foydalaning", "Xulosa va shaxsiy fikringizni alohida yozing"],
+    model: "demo",
+    estimated: true,
+    at: new Date().toISOString(),
+  };
+}
+
+const clampList = (a, n = 5) => (Array.isArray(a) ? a.map((x) => str(String(x ?? ""), 400)).filter(Boolean).slice(0, n) : []);
+
+async function aiSelfReview(item) {
+  const found = findSelfTask(item.taskId);
+  if (!aiEnabled()) return demoSelfReview(item);
+  const prompt = `Talabaning mustaqil ishini baholang.
+Fan mavzusi: ${found ? `${found.topic.num}-mavzu. ${found.topic.title}` : item.topicTitle}
+Topshiriq: ${found?.task.title || item.taskTitle} (${found?.task.type || "mustaqil ish"})
+Topshiriq sharti: ${found?.task.description || ""}
+
+Talabaning javobi:
+"""
+${(item.text || "").slice(0, 8000) || "(matn yozilmagan)"}
+"""
+${item.link ? `Talaba fayl/loyiha havolasini biriktirgan: ${item.link} (havola mazmunini ko'ra olmaysiz — faqat matn bo'yicha baholang va buni hisobga oling).` : ""}
+
+Baho: 5 — a'lo, 4 — yaxshi, 3 — qoniqarli, 2 — qoniqarsiz. Topshiriq shartiga moslik, mazmun to'liqligi, mustaqil fikr va kasbiy terminologiyani hisobga oling.
+Javobni FAQAT JSON obyekt sifatida qaytaring: {"grade":4,"summary":"2–3 gapli umumiy xulosa","strengths":["..."],"improvements":["..."],"recommendations":["..."]}. Barcha matnlar o'zbek tilida (lotin).`;
+  let last = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await completeText({
+      system: "Sen oliy ta'lim o'qituvchisi va pedagogik ekspertsan. Talabaning mustaqil ishini xolis baholaysan. Javobni faqat JSON ko'rinishida qaytar.",
+      messages: [{ role: "user", content: prompt }],
+      maxTokens: 2500,
+      effort: "low",
+      format: { type: "json_schema", schema: SELF_REVIEW_SCHEMA },
+    }).catch((e) => ((last = e.message), ""));
+    const text = String(raw || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    let obj = null;
+    try {
+      obj = JSON.parse(text);
+    } catch {
+      const a = text.indexOf("{"), b = text.lastIndexOf("}");
+      if (a >= 0 && b > a) try { obj = JSON.parse(text.slice(a, b + 1)); } catch {}
+    }
+    const grade = Math.round(Number(obj?.grade ?? obj?.baho));
+    if (obj && grade >= 2 && grade <= 5) {
+      return {
+        grade,
+        summary: str(String(obj.summary ?? obj.xulosa ?? ""), 1500),
+        strengths: clampList(obj.strengths),
+        improvements: clampList(obj.improvements),
+        recommendations: clampList(obj.recommendations),
+        model: modelName(),
+        at: new Date().toISOString(),
+      };
+    }
+    last ||= "AI javobi tushunarsiz formatda keldi";
+  }
+  throw new HttpError(502, `AI tahlilini olib bo'lmadi: ${last}`);
+}
+
+async function reviewSelfStudy(req, taskId) {
+  const user = await requireUser(req);
+  const key = `selfstudy/${user.id}/${taskId}`;
+  const item = await db().get(key);
+  if (!item) throw new HttpError(404, "Topshiriq topilmadi");
+  item.ai = await aiSelfReview(item);
+  delete item.aiError;
+  await db().set(key, item);
+  return json(item);
+}
+
+// Milestone PDF hisobotining titul varag'i (o'qituvchi panelida o'zgartiriladi)
+const REPORT_DEFAULTS = {
+  country: "O‘zbekiston Respublikasi",
+  ministry: "Ta’lim va ilm-fan vazirligi",
+  university: "O‘zbekiston Milliy universitetining Jizzax filiali",
+  faculty: "Psixologiya fakulteti",
+  subject: "Turistik korxonalar faoliyati tahlili",
+  city: "Jizzax",
+  teacher: "",
+};
+const reportSettings = async () => ({ ...REPORT_DEFAULTS, ...((await db().get("meta/report-settings")) || {}) });
+
+async function getReportSettings(req) {
+  await requireUser(req);
+  return json(await reportSettings());
+}
+
+async function setReportSettings(req) {
+  await requireTeacher(req);
+  const b = await body(req);
+  const next = Object.fromEntries(Object.keys(REPORT_DEFAULTS).map((k) => [k, str(b[k] ?? "", 200)]));
+  await db().set("meta/report-settings", next);
+  return json({ ...REPORT_DEFAULTS, ...next });
+}
+
 async function submitSelfStudy(req, taskId) {
   const user = await requireUser(req);
   const b = await body(req);
@@ -596,6 +723,13 @@ async function submitSelfStudy(req, taskId) {
     feedback: prev?.feedback ?? "",
     resubmitted: Boolean(prev),
   };
+  // AI tahlili (bir necha soniya). Xato bo'lsa ham topshiriq saqlanadi — keyin "AI tahlilini olish" tugmasi bilan qayta urinish mumkin.
+  try {
+    item.ai = await aiSelfReview(item);
+  } catch (err) {
+    item.ai = null;
+    item.aiError = err.message;
+  }
   await db().set(key, item);
   return json(item);
 }
@@ -2222,6 +2356,9 @@ const routes = [
   ["PUT", /^progress$/, saveProgress],
   ["GET", /^self-study$/, mySelfStudy],
   ["POST", /^self-study\/([\w-]+)$/, submitSelfStudy],
+  ["POST", /^self-study\/([\w-]+)\/review$/, reviewSelfStudy],
+  ["GET", /^report-settings$/, getReportSettings],
+  ["PUT", /^admin\/report-settings$/, setReportSettings],
 
   ["GET", /^trainer\/scenarios$/, async () => json({ scenarios: SCENARIOS.map(publicScenario), criteria: CRITERIA, aiEnabled: aiEnabled(), voiceAI: voiceEnabled() })],
   ["POST", /^trainer\/chat$/, trainerChat],

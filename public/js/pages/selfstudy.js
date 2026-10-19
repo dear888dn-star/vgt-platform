@@ -1,7 +1,9 @@
 import { h, mount, toast, modal, fmtDate, progressBar, loading } from "../ui.js";
-import { api } from "../api.js";
+import { api, session } from "../api.js";
 import { TOPICS } from "../../data/topics.js";
 import { loadProgress, updatePlan, setNote, topicCompletion } from "../progress.js";
+import { MILESTONES, milestoneRange, milestoneStatus } from "../milestones.js";
+import { confetti } from "../motion.js";
 
 const JOURNAL_KEY = "__journal";
 
@@ -42,6 +44,7 @@ export async function render(el) {
     el,
     h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Mustaqil ta'lim"), h("p", { class: "muted" }, "O'quv rejangizni tuzing, topshiriqlarni bajaring va o'z rivojlanishingizni kuzating."))),
     stats,
+    milestonesSection(subs),
     recs.length > 0 && h("div", { class: "card accent" }, h("h3", {}, "🎯 Siz uchun tavsiyalar"), h("ul", {}, recs)),
     h("div", { class: "grid cols-2" }, planner(progress), journal(progress)),
     tasksSection(allTasks, subs, refresh)
@@ -123,8 +126,85 @@ function journal(progress) {
 
 function statusOf(sub) {
   if (!sub) return h("span", { class: "badge" }, "Topshirilmagan");
-  if (sub.grade == null || sub.resubmitted) return h("span", { class: "badge badge-warn" }, "Tekshirilmoqda");
-  return h("span", { class: `badge ${sub.grade >= 4 ? "badge-ok" : "badge-warn"}` }, `Baho: ${sub.grade}`);
+  const ai = sub.ai?.grade ? h("span", { class: `badge ${sub.ai.grade >= 4 ? "badge-ok" : "badge-warn"}`, title: "Sun'iy intellekt bahosi" }, `🤖 AI: ${sub.ai.grade}`) : null;
+  if (sub.grade == null || sub.resubmitted) return h("span", { class: "row", style: { gap: "6px" } }, ai, h("span", { class: "badge badge-warn" }, "O'qituvchi tekshirmoqda"));
+  return h("span", { class: "row", style: { gap: "6px" } }, ai, h("span", { class: `badge ${sub.grade >= 4 ? "badge-ok" : "badge-warn"}` }, `O'qituvchi: ${sub.grade}`));
+}
+
+/** AI tahlili bloki (topshiriq kartochkasi va topshirish oynasida). */
+function aiReviewBox(sub, onRetry) {
+  if (!sub) return null;
+  if (!sub.ai) {
+    return h("div", { class: "alert alert-warn small" }, "🤖 AI tahlili olinmadi", sub.aiError ? `: ${sub.aiError}` : "", " ", onRetry && h("button", { class: "btn small ghost", onclick: onRetry }, "AI tahlilini olish"));
+  }
+  const list = (title, items) => (items?.length ? h("div", {}, h("b", {}, title), h("ul", {}, items.map((x) => h("li", {}, x)))) : null);
+  return h("details", { class: "ai-review" },
+    h("summary", {}, h("b", {}, `🤖 Sun'iy intellekt tahlili — baho: ${sub.ai.grade}`), sub.ai.estimated ? h("span", { class: "muted small" }, " (taxminiy)") : null),
+    sub.ai.summary && h("p", {}, sub.ai.summary),
+    list("Kuchli tomonlari", sub.ai.strengths),
+    list("Kamchiliklar", sub.ai.improvements),
+    list("Tavsiyalar", sub.ai.recommendations));
+}
+
+// ---------------- Bosqichlar (milestone) va PDF hisobot ----------------
+
+let reportSettingsCache = null;
+export async function downloadMilestone(milestone, subs, btn) {
+  const { downloadMilestonePdf } = await import("../report-pdf.js");
+  const label = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "PDF tayyorlanmoqda…";
+  }
+  try {
+    reportSettingsCache ||= await api.get("report-settings");
+    await downloadMilestonePdf({ milestone, user: session.user, subs, settings: reportSettingsCache });
+    toast("PDF yuklab olindi", "ok");
+  } catch (e) {
+    toast(e.message || "PDF yaratib bo'lmadi", "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+}
+
+/** Bosqich kartochkasi: progress, qolgan topshiriqlar yoki yutuq + PDF. */
+export function milestoneCard(m, subs, { compact = false } = {}) {
+  const st = milestoneStatus(m, subs);
+  const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
+  const seenKey = `vgt.milestone.${session.user?.id}.${m.n}`;
+  if (st.complete) {
+    let first = false;
+    try {
+      first = !localStorage.getItem(seenKey);
+      localStorage.setItem(seenKey, "1");
+    } catch {}
+    if (first) setTimeout(() => confetti(), 300);
+    const btn = h("button", { class: "btn lg", onclick: () => downloadMilestone(m, subs, btn) }, "⬇ PDF hisobotni yuklab olish");
+    return h("div", { class: `card ms-card done ${first ? "fresh" : ""}` },
+      h("div", { class: "ms-medal", "aria-hidden": "true" }, "🏆"),
+      h("div", { class: "ms-body" },
+        h("div", { class: "eyebrow" }, `Yutuq · ${m.n}-bosqich`),
+        h("h3", {}, `${m.n}-bosqich yakunlandi! (${milestoneRange(m)}-mavzular)`),
+        h("p", { class: "muted small" }, `Barcha ${st.total} ta mustaqil ish topshirildi. PDF hisobotda titul varag'i, topshiriqlar, javoblaringiz, sun'iy intellekt tahlili va o'qituvchi baholari jamlangan.`),
+        btn));
+  }
+  return h("div", { class: "card ms-card" },
+    h("div", { class: "ms-medal locked", "aria-hidden": "true" }, "🔒"),
+    h("div", { class: "ms-body" },
+      h("div", { class: "eyebrow" }, `${m.n}-bosqich · ${milestoneRange(m)}-mavzular`),
+      h("h3", {}, `Mustaqil ishlar: ${st.done} / ${st.total}`),
+      progressBar(pct),
+      h("p", { class: "muted small" }, `Bosqichdagi barcha mustaqil ishlarni topshirganingizdan so'ng PDF hisobot ochiladi. Qolgan: ${st.missing.length} ta.`),
+      !compact && st.missing.length
+        ? h("ul", { class: "ms-missing small" }, st.missing.slice(0, 6).map((t) => h("li", {}, h("a", { href: `#/self-study?task=${t.id}` }, `${t.topic.num}-mavzu: ${t.title}`))), st.missing.length > 6 ? h("li", { class: "muted" }, `… yana ${st.missing.length - 6} ta`) : null)
+        : null));
+}
+
+function milestonesSection(subs) {
+  return h("section", { class: "ms-section" }, h("h2", { class: "section-title" }, "🏁 Bosqichlar va PDF hisobotlar"), h("div", { class: "grid cols-2" }, MILESTONES.map((m) => milestoneCard(m, subs))));
 }
 
 function tasksSection(allTasks, subs, refresh) {
@@ -145,7 +225,16 @@ function tasksSection(allTasks, subs, refresh) {
               return h(
                 "div",
                 { class: "task" },
-                h("div", { class: "grow" }, h("div", { class: "row wrap" }, h("b", {}, t.title), h("span", { class: "chip chip-soft" }, t.type), statusOf(sub)), h("p", { class: "small" }, t.description), sub?.feedback && h("div", { class: "alert alert-info small" }, h("b", {}, "O'qituvchi izohi: "), sub.feedback)),
+                h("div", { class: "grow" }, h("div", { class: "row wrap" }, h("b", {}, t.title), h("span", { class: "chip chip-soft" }, t.type), statusOf(sub)), h("p", { class: "small" }, t.description), aiReviewBox(sub, async (e) => {
+                  e.target.disabled = true;
+                  try {
+                    await api.post(`self-study/${t.id}/review`, {});
+                    refresh();
+                  } catch (ex) {
+                    toast(ex.message, "error");
+                    e.target.disabled = false;
+                  }
+                }), sub?.feedback && h("div", { class: "alert alert-info small" }, h("b", {}, "O'qituvchi izohi: "), sub.feedback)),
                 h("button", { class: `btn small ${sub ? "ghost" : ""}`, onclick: () => openSubmit(t, sub, refresh) }, sub ? "Ko'rish / qayta topshirish" : "Topshirish")
               );
             })
@@ -173,14 +262,21 @@ function openSubmit(task, sub, onDone) {
       h("p", { class: "small muted" }, "Fayllarni (taqdimot, video, rasm) Google Drive yoki boshqa xizmatga yuklab, ochiq havolasini qo'shing."),
       h("div", { class: "row end" }, h("button", { class: "btn", onclick: async (e) => {
         e.target.disabled = true;
+        e.target.textContent = "Yuborilmoqda, AI tahlil qilmoqda…";
         try {
-          await api.post(`self-study/${task.id}`, { text: text.value, link: link.value, taskTitle: task.title, topicTitle: task.topic.title });
+          const saved = await api.post(`self-study/${task.id}`, { text: text.value, link: link.value, taskTitle: task.title, topicTitle: task.topic.title });
           toast("Topshiriq yuborildi!", "ok");
           close();
           onDone();
+          const box = aiReviewBox(saved);
+          if (saved.ai) {
+            box.open = true;
+            modal("🤖 Sun'iy intellekt tahlili", h("div", { class: "stack" }, h("p", { class: "muted" }, task.title), box, h("p", { class: "small muted" }, "Yakuniy bahoni o'qituvchi qo'yadi. AI tavsiyalari va baholari bosqich PDF hisobotiga kiritiladi.")));
+          }
         } catch (ex) {
           toast(ex.message, "error");
           e.target.disabled = false;
+          e.target.textContent = sub ? "Qayta yuborish" : "Yuborish";
         }
       } }, sub ? "Qayta yuborish" : "Yuborish"))
     ),

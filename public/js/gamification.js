@@ -129,6 +129,12 @@ export function computeGame(evidence = {}, today = new Date()) {
     longest,
     activeDays: Object.keys(progress.activity || {}).length,
     geoBest: geo.best || 0,
+    // Mustaqil ish bosqichlari: mavzular ikkiga bo'linadi, bosqichdagi barcha topshiriqlar topshirilgan bo'lsa — yakunlangan
+    milestones: (() => {
+      const sent = new Set((evidence.selfStudy || []).map((x) => x.taskId));
+      const half = Math.ceil(TOPICS.length / 2);
+      return [TOPICS.slice(0, half), TOPICS.slice(half)].map((ts) => ts.flatMap((t) => (t.selfStudy || []).map((x) => x.id))).map((ids) => ids.length > 0 && ids.every((id) => sent.has(id)));
+    })(),
   };
   const badges = BADGES.map((b) => ({ ...b, earned: b.test(stats), progress: b.progress ? Math.min(1, b.progress(stats)) : null }));
   return { xp, level: levelOf(xp), bySource, topics, stats, badges };
@@ -152,6 +158,8 @@ export const BADGES = [
   { id: "review", icon: "🔁", title: "Xotira chempioni", text: "100 ta kartani takrorlang", test: (s) => s.reviews >= 100, progress: (s) => s.reviews / 100 },
   { id: "mastered", icon: "💎", title: "Lug'at boyligi", text: "30 ta tushunchani to'liq yodlang", test: (s) => s.mastered >= 30, progress: (s) => s.mastered / 30 },
   { id: "studio", icon: "🎬", title: "Ekskursiya muallifi", text: "3+ bekatli virtual ekskursiya yarating va ulashing", test: (s) => s.toursPublished >= 1 },
+  { id: "milestone1", icon: "📘", title: "1-bosqich", text: "Birinchi bosqich mavzularining barcha mustaqil ishlarini topshiring", test: (s) => s.milestones[0] },
+  { id: "milestone2", icon: "📗", title: "2-bosqich", text: "Ikkinchi bosqich mavzularining barcha mustaqil ishlarini topshiring", test: (s) => s.milestones[1] },
   { id: "geo", icon: "🌍", title: "Geograf gid", text: "Geo-sayohatda 6000+ ball to'plang", test: (s) => s.geoBest >= 6000, progress: (s) => s.geoBest / 6000 },
   { id: "streak3", icon: "🔥", title: "Uch kunlik safar", text: "3 kun ketma-ket o'qing", test: (s) => s.longest >= 3, progress: (s) => s.longest / 3 },
   { id: "streak7", icon: "⚡", title: "Haftalik marafon", text: "7 kun ketma-ket o'qing", test: (s) => s.longest >= 7, progress: (s) => s.longest / 7 },

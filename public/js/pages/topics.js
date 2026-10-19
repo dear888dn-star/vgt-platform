@@ -11,6 +11,8 @@ import { renderMethod } from "../methods.js";
 import { TOPIC_MAP } from "../../data/standard.js";
 import { competencyChips } from "../competency.js";
 import { confetti, shake } from "../motion.js";
+import { milestoneEndingAt } from "../milestones.js";
+import { milestoneCard } from "./selfstudy.js";
 
 export async function renderList(el) {
   const [, slideList] = await Promise.all([loadProgress(), api.get("slides").catch(() => ({ slides: [] }))]);
@@ -63,6 +65,17 @@ const CHAPTERS = [
 ];
 
 const stripTags = (html) => html.replace(/<[^>]+>/g, " ");
+
+/** Bosqichning oxirgi mavzusida (masalan 8- va 15-mavzu): bosqich holati yoki yutuq + PDF hisobot. */
+function milestoneSlot(topic) {
+  const m = milestoneEndingAt(topic.id);
+  if (!m || !session.user || session.user.role !== "student") return null;
+  const slot = h("div", { class: "lesson-milestone" });
+  api.get("self-study")
+    .then((list) => slot.replaceChildren(milestoneCard(m, Object.fromEntries(list.map((x) => [x.taskId, x])))))
+    .catch(() => slot.remove());
+  return slot;
+}
 
 export async function renderTopic(el, id) {
   await loadProgress();
@@ -144,6 +157,7 @@ export async function renderTopic(el, id) {
       ring
     ),
     h("div", { class: "lesson-layout" }, rail, body),
+    milestoneSlot(topic),
     h(
       "div",
       { class: "lesson-pager" },

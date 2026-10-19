@@ -389,3 +389,23 @@
 .mg-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.4s ease; }
 .mg-log { max-height: 180px; overflow: auto; font-size: 0.78rem; color: var(--muted); margin: 0; padding-left: 1.2em; }
 .err-text { color: var(--err); font-weight: 600; }
+
+/* ===== Mustaqil ish bosqichlari (milestone) va AI tahlili ===== */
+.ms-section { margin: 18px 0; }
+.ms-card { display: flex; gap: 14px; align-items: flex-start; }
+.ms-card.done { background: linear-gradient(135deg, var(--accent-soft), var(--surface) 70%); border-color: var(--accent); }
+.ms-medal { flex: none; width: 54px; height: 54px; display: grid; place-items: center; font-size: 1.9rem; border-radius: 50%; background: var(--accent-soft); }
+.ms-medal.locked { background: var(--surface-2); filter: grayscale(0.4); }
+.ms-body { flex: 1; min-width: 0; }
+.ms-body h3 { margin: 0 0 4px; }
+.ms-missing { margin: 6px 0 0; padding-left: 1.2em; }
+.ms-missing li { margin: 2px 0; }
+.ms-card.done.fresh .ms-medal { animation: msPop 0.9s cubic-bezier(.2, 1.6, .4, 1) both; }
+@keyframes msPop { 0% { transform: scale(0.2) rotate(-30deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
+.lesson-milestone:empty { display: none; }
+.lesson-milestone { margin: 18px 0; }
+.ai-review { margin-top: 8px; padding: 8px 12px; border-radius: 12px; background: var(--primary-soft); border: 1px solid var(--border); }
+.ai-review summary { cursor: pointer; }
+.ai-review ul { margin: 4px 0 6px; padding-left: 1.2em; }
+.ai-review p { margin: 6px 0; }
+@media (prefers-reduced-motion: reduce) { .ms-card.done.fresh .ms-medal { animation: none; } }

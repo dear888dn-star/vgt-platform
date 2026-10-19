@@ -16,6 +16,7 @@ import { buildScenes } from "../lesson-player.js";
 import { bookParagraphs } from "../audiobook.js";
 import { TOUR } from "./tour.js";
 import { createForm } from "./live.js";
+import { MILESTONES, milestoneRange, milestoneStatus } from "../milestones.js";
 import { ARCHIVE, ARCHIVE_LEVELS, codesFrom, levelMean, levelIndexOfB, addLevels } from "../../data/research-archive.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
@@ -37,7 +38,7 @@ const SECTIONS = [
   { key: "competencies", icon: "🎯", title: "Kompetensiyalar", group: "research", desc: "Kasb standarti bo'yicha TG/NG kesimidagi kompetensiyalar xaritasi." },
   { key: "builder", icon: "🛠", title: "So'rovnoma konstruktori", group: "research", desc: "Yangi so'rovnoma va test yaratish, JSON import/eksport." },
   { key: "students", icon: "👥", title: "O'quvchilar", group: "class", desc: "Ro'yxat, TG/NG guruhlariga ajratish, parolni tiklash.", meta: (o) => `${o.students} nafar · TG ${o.cohorts.experimental} · NG ${o.cohorts.control}` },
-  { key: "self-study", icon: "🧩", title: "Mustaqil ishlar", group: "class", desc: "Topshiriqlarni baholash va izoh yozish.", badge: (o) => o.ungraded && [`${o.ungraded} ta baholanmagan`, "warn"], meta: (o) => `${o.selfStudySubmissions} ta topshiriq` },
+  { key: "self-study", icon: "🧩", title: "Mustaqil ishlar", group: "class", desc: "Topshiriqlarni baholash, AI tahlillari, bosqich PDF hisobotlari va titul ma'lumotlari.", badge: (o) => o.ungraded && [`${o.ungraded} ta baholanmagan`, "warn"], meta: (o) => `${o.selfStudySubmissions} ta topshiriq` },
   { key: "routes", icon: "🗺", title: "Marshrut loyihalari", group: "class", desc: "10 mezonli rubrika bilan marshrut laboratoriyasi loyihalarini baholash.", badge: (o) => o.routes.submitted && [`${o.routes.submitted} ta yangi`, "warn"], meta: (o) => `${o.routes.graded} tasi baholangan` },
   { key: "trainer", icon: "🎙", title: "Trenajyor natijalari", group: "class", desc: "AI baholagan mashg'ulotlar, suhbat yozuvlari va mezonlar.", meta: (o) => `${o.trainerSessions} ta mashg'ulot${o.avgTrainerScore !== null ? ` · o'rtacha ${o.avgTrainerScore}` : ""}` },
   { key: "studio", icon: "🎬", title: "Ekskursiyalar", group: "class", desc: "O'quvchilar yaratgan virtual ekskursiyalar va AI tahlillari." },
@@ -1382,10 +1383,13 @@ async function trainer(el) {
 // ---------------- Mustaqil ishlar ----------------
 
 async function selfStudy(el) {
-  const items = await api.get("admin/self-study");
-  if (!items.length) return mount(el, emptyState("🧩", "Hali mustaqil ishlar topshirilmagan"));
+  const [items, settings] = await Promise.all([api.get("admin/self-study"), api.get("report-settings")]);
   let onlyPending = true;
   const list = h("div", { class: "stack" });
+  const aiBox = (it) =>
+    it.ai
+      ? h("details", { class: "ai-review" }, h("summary", {}, h("b", {}, `🤖 AI tahlili — baho: ${it.ai.grade}`), it.ai.estimated ? h("span", { class: "muted small" }, " (taxminiy)") : null), it.ai.summary && h("p", {}, it.ai.summary), ...[["Kuchli tomonlari", it.ai.strengths], ["Kamchiliklar", it.ai.improvements], ["Tavsiyalar", it.ai.recommendations]].map(([t, a]) => (a?.length ? h("div", {}, h("b", {}, t), h("ul", {}, a.map((x) => h("li", {}, x)))) : null)))
+      : h("p", { class: "muted small" }, "🤖 AI tahlili yo'q");
   const draw = () => {
     const rs = items.filter((i) => !onlyPending || i.grade == null || i.resubmitted);
     list.replaceChildren(
@@ -1396,14 +1400,66 @@ async function selfStudy(el) {
           h("div", { class: "row between wrap" }, h("div", {}, h("b", {}, it.taskTitle), h("div", { class: "muted small" }, `${it.topicTitle} · ${it.user.name} (${it.user.group || "—"}) · ${fmtDate(it.submittedAt)}`)), it.grade != null ? h("span", { class: `badge ${it.resubmitted ? "badge-warn" : "badge-ok"}` }, it.resubmitted ? `Qayta topshirilgan (avval: ${it.grade})` : `Baho: ${it.grade}`) : h("span", { class: "badge badge-warn" }, "Baholanmagan")),
           it.text && h("p", { class: "pre-wrap" }, it.text),
           it.link && h("p", {}, "🔗 ", h("a", { href: it.link, target: "_blank", rel: "noopener noreferrer" }, it.link)),
+          aiBox(it),
           gradeForm(it, draw)
         )
       )
     );
-    if (!rs.length) list.append(emptyState("✅", "Barcha ishlar baholangan"));
+    if (!rs.length) list.append(emptyState("✅", items.length ? "Barcha ishlar baholangan" : "Hali mustaqil ishlar topshirilmagan"));
   };
-  mount(el, h("label", { class: "check" }, h("input", { type: "checkbox", checked: true, onchange: (e) => ((onlyPending = e.target.checked), draw()) }), "Faqat baholanmaganlarni ko'rsatish"), list);
+  mount(el, reportSettingsCard(settings), milestoneTable(items, settings), h("h3", {}, "Topshirilgan ishlar"), h("label", { class: "check" }, h("input", { type: "checkbox", checked: true, onchange: (e) => ((onlyPending = e.target.checked), draw()) }), "Faqat baholanmaganlarni ko'rsatish"), list);
   draw();
+}
+
+/** PDF hisobot titul varag'i ma'lumotlari (vazirlik, OTM, fakultet, fan, shahar, o'qituvchi). */
+function reportSettingsCard(settings) {
+  const FIELDS = [["country", "Davlat"], ["ministry", "Vazirlik"], ["university", "Oliy ta'lim muassasasi"], ["faculty", "Fakultet"], ["subject", "Fan nomi"], ["city", "Shahar"], ["teacher", "Tekshiruvchi o'qituvchi (F.I.Sh.)"]];
+  const inputs = Object.fromEntries(FIELDS.map(([k]) => [k, h("input", { value: settings[k] || "", maxlength: 200 })]));
+  return h("details", { class: "card" },
+    h("summary", {}, h("b", {}, "🧾 PDF hisobot titul varag'i"), h("span", { class: "muted small" }, ` — ${settings.university}, “${settings.subject}”`)),
+    h("p", { class: "muted small" }, "Talabalar bosqich (milestone) yakunida yuklab oladigan PDF hisobotning titul varag'ida shu ma'lumotlar chiqadi. Talabaning ismi va guruhi profilidan avtomatik olinadi."),
+    h("div", { class: "grid cols-2" }, FIELDS.map(([k, label]) => h("label", { class: "field" }, h("span", {}, label), inputs[k]))),
+    h("div", { class: "row end" }, h("button", { class: "btn", onclick: async () => {
+      try {
+        const saved = await api.put("admin/report-settings", Object.fromEntries(FIELDS.map(([k]) => [k, inputs[k].value])));
+        Object.assign(settings, saved);
+        toast("Titul ma'lumotlari saqlandi", "ok");
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    } }, "Saqlash")));
+}
+
+/** Talabalar kesimida bosqichlar holati va PDF hisobotlar. */
+function milestoneTable(items, settings) {
+  const byUser = new Map();
+  for (const it of items) {
+    if (!byUser.has(it.userId)) byUser.set(it.userId, { user: it.user, subs: {} });
+    byUser.get(it.userId).subs[it.taskId] = it;
+  }
+  const rows = [...byUser.values()].sort((a, b) => (a.user.group || "").localeCompare(b.user.group || "") || a.user.name.localeCompare(b.user.name));
+  const cell = (m, r) => {
+    const st = milestoneStatus(m, r.subs);
+    if (!st.complete) return h("td", {}, h("span", { class: "muted" }, `${st.done} / ${st.total}`));
+    const btn = h("button", { class: "btn small", onclick: async () => {
+      btn.disabled = true;
+      try {
+        const { downloadMilestonePdf } = await import("../report-pdf.js");
+        await downloadMilestonePdf({ milestone: m, user: r.user, subs: r.subs, settings });
+      } catch (e) {
+        toast(e.message, "error");
+      }
+      btn.disabled = false;
+    } }, "⬇ PDF");
+    return h("td", {}, h("span", { class: "badge badge-ok" }, "🏆 yakunlandi"), " ", btn);
+  };
+  return h("div", { class: "card table-wrap" },
+    h("h3", {}, "🏁 Bosqichlar bo'yicha hisobotlar"),
+    h("p", { class: "muted small" }, `Mavzular ikki bosqichga bo'lingan: ${MILESTONES.map((m) => `${m.n}-bosqich — ${milestoneRange(m)}-mavzular`).join("; ")}. Bosqichdagi barcha mustaqil ishlar topshirilgach, talaba PDF hisobotni oladi; uni shu yerdan ham yuklab olish mumkin.`),
+    rows.length
+      ? h("table", { class: "table" }, h("thead", {}, h("tr", {}, h("th", {}, "Talaba"), h("th", {}, "Guruh"), MILESTONES.map((m) => h("th", {}, `${m.n}-bosqich (${milestoneRange(m)})`)))),
+          h("tbody", {}, rows.map((r) => h("tr", {}, h("td", {}, r.user.name), h("td", {}, r.user.group || "—"), MILESTONES.map((m) => cell(m, r))))))
+      : h("p", { class: "muted" }, "Hali topshirilgan mustaqil ishlar yo'q."));
 }
 
 function gradeForm(it, redraw) {
