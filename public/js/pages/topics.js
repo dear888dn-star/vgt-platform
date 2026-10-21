@@ -13,6 +13,7 @@ import { competencyChips } from "../competency.js";
 import { confetti, shake } from "../motion.js";
 import { milestoneEndingAt } from "../milestones.js";
 import { milestoneCard } from "./selfstudy.js";
+import { loadDeadlines, accessChip, lockedText } from "../deadlines.js";
 
 export async function renderList(el) {
   const [, slideList] = await Promise.all([loadProgress(), api.get("slides").catch(() => ({ slides: [] }))]);
@@ -65,6 +66,20 @@ const CHAPTERS = [
 ];
 
 const stripTags = (html) => html.replace(/<[^>]+>/g, " ");
+
+/** Mustaqil ish muddati: ochiq / ochilish sanasi / yopilgan (dars jadvaliga ko'ra). */
+function deadlineSlot(topic) {
+  if (session.user?.role !== "student") return null;
+  const slot = h("div", { class: "row wrap dl-slot" });
+  loadDeadlines()
+    .then((dl) => {
+      const a = dl.access(topic.id);
+      if (a.state === "free") return slot.remove();
+      slot.replaceChildren(...[accessChip(a), !a.allowed && h("span", { class: "small muted" }, lockedText(a))].filter(Boolean));
+    })
+    .catch(() => slot.remove());
+  return slot;
+}
 
 /** Bosqichning oxirgi mavzusida (masalan 8- va 15-mavzu): bosqich holati yoki yutuq + PDF hisobot. */
 function milestoneSlot(topic) {
@@ -425,6 +440,7 @@ function selfTab(topic) {
     "div",
     { class: "stack" },
     h("p", {}, "Mustaqil ish topshiriqlarini bajaring va ", h("a", { href: "#/self-study" }, "Mustaqil ta'lim"), " bo'limi orqali o'qituvchiga yuboring."),
+    deadlineSlot(topic),
     topic.selfStudy.map((s) =>
       h("div", { class: "card" }, h("div", { class: "row between" }, h("h3", {}, s.title), h("span", { class: "badge" }, s.type)), h("p", {}, s.description), h("a", { href: `#/self-study?task=${s.id}`, class: "btn small" }, "Topshirish →"))
     )

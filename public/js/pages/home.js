@@ -5,6 +5,7 @@ import { loadProgress, topicCompletion, loadGame } from "../progress.js";
 import { dueCount } from "./review.js";
 import { mountScene, LANDMARK_NAMES } from "../landmarks.js";
 import { introVideo } from "../media.js";
+import { deadlineNotice } from "../deadlines.js";
 
 const SHOWCASE = [
   ["registan", "Samarqand"],
@@ -121,6 +122,7 @@ export async function render(el) {
             h("a", { href: user.role === "teacher" ? "#/teacher" : "#/self-study", class: "btn" }, user.role === "teacher" ? "O'qituvchi paneli" : "O'quv rejam"),
             user.role === "student" && h("a", { href: "#/standard", class: "btn ghost" }, "🎯 Kompetensiya xaritam")))
       ),
+    user?.role === "student" && deadlineNotice(),
     !user &&
       h("div", { class: "card hero-card accent" }, h("div", { class: "row between wrap" }, h("div", {}, h("h3", {}, "Profilingizni yarating"), h("p", { class: "muted small" }, "Email va parol orqali ro'yxatdan o'ting: progressingiz saqlanadi, trenajyor, diagnostika va marshrut laboratoriyasi ochiladi.")), h("div", { class: "row" }, h("a", { href: "#/register", class: "btn" }, "Ro'yxatdan o'tish"), h("a", { href: "#/login", class: "btn ghost" }, "Kirish")))),
     h("h2", { class: "section-title" }, "Platforma imkoniyatlari"),

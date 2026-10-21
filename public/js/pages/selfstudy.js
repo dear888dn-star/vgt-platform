@@ -4,12 +4,15 @@ import { TOPICS } from "../../data/topics.js";
 import { loadProgress, updatePlan, setNote, topicCompletion } from "../progress.js";
 import { MILESTONES, milestoneRange, milestoneStatus } from "../milestones.js";
 import { confetti } from "../motion.js";
+import { loadDeadlines, deadlineNotice, accessChip, lockedText } from "../deadlines.js";
 
 const JOURNAL_KEY = "__journal";
 
 export async function render(el) {
   mount(el, loading());
-  const [progress, submissions, sessions] = await Promise.all([loadProgress(), api.get("self-study"), api.get("trainer/sessions").catch(() => [])]);
+  const [progress, submissions, sessions, dl] = await Promise.all([loadProgress(), api.get("self-study"), api.get("trainer/sessions").catch(() => []), loadDeadlines().catch(() => null)]);
+  // Muddatlar yuklanmasa (eski server) — cheklovsiz
+  const access = (topicId) => dl?.access(topicId) || { state: "free", allowed: true };
   const subs = Object.fromEntries(submissions.map((s) => [s.taskId, s]));
   const allTasks = TOPICS.flatMap((t) => t.selfStudy.map((s) => ({ ...s, topic: t })));
 
@@ -43,16 +46,19 @@ export async function render(el) {
   mount(
     el,
     h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Mustaqil ta'lim"), h("p", { class: "muted" }, "O'quv rejangizni tuzing, topshiriqlarni bajaring va o'z rivojlanishingizni kuzating."))),
+    session.user?.role === "student" && dl && deadlineNotice({ dl, subs }),
     stats,
     milestonesSection(subs),
     recs.length > 0 && h("div", { class: "card accent" }, h("h3", {}, "🎯 Siz uchun tavsiyalar"), h("ul", {}, recs)),
     h("div", { class: "grid cols-2" }, planner(progress), journal(progress)),
-    tasksSection(allTasks, subs, refresh)
+    tasksSection(allTasks, subs, refresh, access)
   );
 
-  const want = new URLSearchParams(location.hash.split("?")[1] || "").get("task");
-  const task = allTasks.find((t) => t.id === want);
-  if (task) openSubmit(task, subs[task.id], refresh);
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const task = allTasks.find((t) => t.id === params.get("task"));
+  if (task) openSubmit(task, subs[task.id], refresh, access(task.topic.id));
+  const topicCard = params.get("topic") && document.getElementById(`ss-${params.get("topic")}`);
+  if (topicCard) topicCard.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function statCard(icon, value, label) {
@@ -207,14 +213,16 @@ function milestonesSection(subs) {
   return h("section", { class: "ms-section" }, h("h2", { class: "section-title" }, "🏁 Bosqichlar va PDF hisobotlar"), h("div", { class: "grid cols-2" }, MILESTONES.map((m) => milestoneCard(m, subs))));
 }
 
-function tasksSection(allTasks, subs, refresh) {
+function tasksSection(allTasks, subs, refresh, access) {
   const container = h("div", { class: "stack" });
   for (const topic of TOPICS) {
+    const a = access(topic.id);
     container.append(
       h(
         "div",
-        { class: "card" },
-        h("h3", {}, `${topic.icon} ${topic.num}. ${topic.title}`),
+        { class: `card ${a.allowed ? "" : "dl-locked"}`, id: `ss-${topic.id}` },
+        h("div", { class: "row between wrap" }, h("h3", {}, `${topic.icon} ${topic.num}. ${topic.title}`), accessChip(a)),
+        !a.allowed && h("p", { class: "small muted" }, lockedText(a)),
         h(
           "div",
           { class: "task-list" },
@@ -235,7 +243,11 @@ function tasksSection(allTasks, subs, refresh) {
                     e.target.disabled = false;
                   }
                 }), sub?.feedback && h("div", { class: "alert alert-info small" }, h("b", {}, "O'qituvchi izohi: "), sub.feedback)),
-                h("button", { class: `btn small ${sub ? "ghost" : ""}`, onclick: () => openSubmit(t, sub, refresh) }, sub ? "Ko'rish / qayta topshirish" : "Topshirish")
+                a.allowed
+                  ? h("button", { class: `btn small ${sub ? "ghost" : ""}`, onclick: () => openSubmit(t, sub, refresh, a) }, sub ? "Ko'rish / qayta topshirish" : "Topshirish")
+                  : sub
+                    ? h("button", { class: "btn small ghost", onclick: () => openSubmit(t, sub, refresh, a) }, "Ko'rish")
+                    : h("button", { class: "btn small ghost", disabled: true, title: lockedText(a) }, a.state === "upcoming" ? "⏳ Hali ochilmagan" : "🔒 Yopiq")
               );
             })
         )
@@ -245,9 +257,9 @@ function tasksSection(allTasks, subs, refresh) {
   return h("section", {}, h("h2", { class: "section-title" }, "🧩 Mustaqil ish topshiriqlari"), container);
 }
 
-function openSubmit(task, sub, onDone) {
-  const text = h("textarea", { rows: 8, placeholder: "Javobingiz, xulosalaringiz..." }, sub?.text || "");
-  const link = h("input", { type: "url", placeholder: "https://... (Google Drive, YouTube, Canva, My Maps havolasi)", value: sub?.link || "" });
+function openSubmit(task, sub, onDone, access = { allowed: true }) {
+  const text = h("textarea", { rows: 8, placeholder: "Javobingiz, xulosalaringiz...", readOnly: !access.allowed }, sub?.text || "");
+  const link = h("input", { type: "url", placeholder: "https://... (Google Drive, YouTube, Canva, My Maps havolasi)", value: sub?.link || "", readOnly: !access.allowed });
   let close;
   close = modal(
     task.title,
@@ -260,7 +272,8 @@ function openSubmit(task, sub, onDone) {
       h("label", { class: "field" }, h("span", {}, "Javob matni"), text),
       h("label", { class: "field" }, h("span", {}, "Fayl yoki loyiha havolasi"), link),
       h("p", { class: "small muted" }, "Fayllarni (taqdimot, video, rasm) Google Drive yoki boshqa xizmatga yuklab, ochiq havolasini qo'shing."),
-      h("div", { class: "row end" }, h("button", { class: "btn", onclick: async (e) => {
+      !access.allowed && h("div", { class: "alert alert-warn small" }, "🔒 ", lockedText(access)),
+      access.allowed && h("div", { class: "row end" }, h("button", { class: "btn", onclick: async (e) => {
         e.target.disabled = true;
         e.target.textContent = "Yuborilmoqda, AI tahlil qilmoqda…";
         try {

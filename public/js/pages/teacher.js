@@ -17,6 +17,7 @@ import { bookParagraphs } from "../audiobook.js";
 import { TOUR } from "./tour.js";
 import { createForm } from "./live.js";
 import { MILESTONES, milestoneRange, milestoneStatus } from "../milestones.js";
+import { topicWindows, topicAccess, fmtDay } from "../schedule.js";
 import { ARCHIVE, ARCHIVE_LEVELS, codesFrom, levelMean, levelIndexOfB, addLevels } from "../../data/research-archive.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
@@ -39,6 +40,7 @@ const SECTIONS = [
   { key: "builder", icon: "🛠", title: "So'rovnoma konstruktori", group: "research", desc: "Yangi so'rovnoma va test yaratish, JSON import/eksport." },
   { key: "students", icon: "👥", title: "O'quvchilar", group: "class", desc: "Ro'yxat, TG/NG guruhlariga ajratish, parolni tiklash.", meta: (o) => `${o.students} nafar · TG ${o.cohorts.experimental} · NG ${o.cohorts.control}` },
   { key: "self-study", icon: "🧩", title: "Mustaqil ishlar", group: "class", desc: "Topshiriqlarni baholash, AI tahlillari, bosqich PDF hisobotlari va titul ma'lumotlari.", badge: (o) => o.ungraded && [`${o.ungraded} ta baholanmagan`, "warn"], meta: (o) => `${o.selfStudySubmissions} ta topshiriq` },
+  { key: "deadlines", icon: "📅", title: "Dars jadvali va muddatlar", group: "class", desc: "Darslarni kalendarga taqsimlash, mustaqil ishlarni topshirish oynasi (±1 hafta) va muddati o'tganlarga ruxsat berish." },
   { key: "routes", icon: "🗺", title: "Marshrut loyihalari", group: "class", desc: "10 mezonli rubrika bilan marshrut laboratoriyasi loyihalarini baholash.", badge: (o) => o.routes.submitted && [`${o.routes.submitted} ta yangi`, "warn"], meta: (o) => `${o.routes.graded} tasi baholangan` },
   { key: "trainer", icon: "🎙", title: "Trenajyor natijalari", group: "class", desc: "AI baholagan mashg'ulotlar, suhbat yozuvlari va mezonlar.", meta: (o) => `${o.trainerSessions} ta mashg'ulot${o.avgTrainerScore !== null ? ` · o'rtacha ${o.avgTrainerScore}` : ""}` },
   { key: "studio", icon: "🎬", title: "Ekskursiyalar", group: "class", desc: "O'quvchilar yaratgan virtual ekskursiyalar va AI tahlillari." },
@@ -65,7 +67,7 @@ const sectionHref = (key) => `#/teacher/${key}`;
 
 export async function render(el, tab = "", param) {
   const content = h("div");
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, backup: backupView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, backup: backupView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy, deadlines: deadlinesView };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   const sec = SECTIONS.find((x) => x.key === tab);
@@ -2182,4 +2184,120 @@ async function backupView(el) {
       h("label", { class: "field" }, h("span", {}, "Zaxira fayli (.json)"), fileIn),
       h("label", { class: "field" }, h("span", {}, "O'qituvchi kodi"), code),
       h("div", { class: "row wrap" }, restore)));
+}
+
+// ---------- Dars jadvali va mustaqil ish muddatlari ----------
+const WEEKDAYS = ["Yak", "Dush", "Sesh", "Chor", "Pay", "Juma", "Shan"];
+const weekday = (date) => WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()];
+
+async function deadlinesView(el) {
+  const [dl, exts, students] = await Promise.all([api.get("deadlines"), api.get("admin/deadline-ext"), api.get("admin/students")]);
+  mount(el, scheduleCard(dl.schedule, () => deadlinesView(el)), extensionsCard(exts, students, () => deadlinesView(el)));
+}
+
+function scheduleCard(schedule, reload) {
+  const st = { enabled: schedule.enabled !== false, windowDays: schedule.windowDays ?? 7, lessons: schedule.lessons.map((l) => ({ ...l })) };
+  const today = new Date().toISOString().slice(0, 10);
+  const body = h("tbody");
+  const enabled = h("input", { type: "checkbox", checked: st.enabled, onchange: () => ((st.enabled = enabled.checked), draw()) });
+  const win = h("input", { type: "number", min: 0, max: 60, value: st.windowDays, style: { width: "80px" }, oninput: () => ((st.windowDays = Number(win.value) || 0), draw()) });
+  const summary = h("div", { class: "dl-summary" });
+  function draw() {
+    const windows = topicWindows(st);
+    body.replaceChildren(
+      ...st.lessons.map((l, i) => {
+        const w = windows[l.topicId];
+        const a = w && topicAccess(windows, l.topicId);
+        return h("tr", { class: l.date === today ? "dl-today" : "" },
+          h("td", {}, i + 1),
+          h("td", {}, h("input", { type: "date", value: l.date, onchange: (e) => ((l.date = e.target.value), draw()) })),
+          h("td", { class: "muted" }, l.date ? weekday(l.date) : ""),
+          h("td", {}, h("select", { onchange: (e) => ((l.topicId = e.target.value), draw()) }, TOPICS.map((t) => h("option", { value: t.id, selected: t.id === l.topicId }, `${t.num}. ${t.title}`)))),
+          h("td", { class: "small" }, w ? `${fmtDay(w.open)} – ${fmtDay(w.close)}` : "—", a && h("span", { class: `badge ${a.state === "open" ? "badge-ok" : ""}` }, a.state === "open" ? " ochiq" : a.state === "upcoming" ? " kutilmoqda" : " yopilgan")),
+          h("td", {}, h("button", { class: "btn small ghost", title: "Darsni o'chirish", onclick: () => (st.lessons.splice(i, 1), draw()) }, "✕")));
+      })
+    );
+    const missing = TOPICS.filter((t) => !windows[t.id]);
+    summary.replaceChildren(...[
+      h("span", {}, `${st.lessons.length} ta dars · ${Object.keys(windows).length} ta mavzu jadvalda`),
+      missing.length ? h("span", { class: "muted" }, ` · jadvalda yo'q (muddatsiz ochiq): ${missing.map((t) => t.num).join(", ")}-mavzular`) : null,
+      !st.enabled ? h("b", { class: "err-text" }, " · muddatlar o'chirilgan — barcha mavzular ochiq") : null
+    ].filter(Boolean));
+  }
+  draw();
+  return h("div", { class: "card table-wrap" },
+    h("h3", {}, "📅 Dars jadvali"),
+    h("p", { class: "muted small" }, "Har bir dars kuni mavzuga biriktiriladi. Talaba mavzuning mustaqil ishlarini birinchi dars kunidan N kun oldin boshlab, oxirgi dars kunidan N kun o'tguncha topshira oladi. Undan keyin topshirish faqat pastdagi «Ruxsat berish» orqali ochiladi. Vaqt — Toshkent vaqti."),
+    h("div", { class: "row wrap" },
+      h("label", { class: "check-row" }, enabled, " Muddatlar yoqilgan"),
+      h("label", { class: "row" }, h("span", {}, "Oyna (kun, darsdan oldin va keyin):"), win)),
+    h("table", { class: "table dl-table" }, h("thead", {}, h("tr", {}, ["№", "Dars sanasi", "Kun", "Mavzu", "Topshirish oynasi (mavzu bo'yicha)", ""].map((x) => h("th", {}, x)))), body),
+    summary,
+    h("div", { class: "row wrap end" },
+      h("button", { class: "btn ghost", onclick: () => {
+        const last = st.lessons[st.lessons.length - 1];
+        st.lessons.push({ date: last?.date || today, topicId: last?.topicId || TOPICS[0].id });
+        draw();
+      } }, "+ Dars qo'shish"),
+      h("button", { class: "btn ghost", onclick: async () => {
+        if (!(await confirmDialog("Standart jadval (2026–2027, 7-semestr, 22 dars) tiklansinmi? Kiritilgan o'zgarishlar o'chadi."))) return;
+        try {
+          await api.put("admin/schedule", { reset: true });
+          toast("Standart jadval tiklandi", "ok");
+          reload();
+        } catch (e) {
+          toast(e.message, "error");
+        }
+      } }, "↺ Standart jadval"),
+      h("button", { class: "btn", onclick: async () => {
+        try {
+          await api.put("admin/schedule", st);
+          toast("Dars jadvali saqlandi", "ok");
+          reload();
+        } catch (e) {
+          toast(e.message, "error");
+        }
+      } }, "Saqlash")));
+}
+
+function extensionsCard(exts, students, reload) {
+  const list = students.filter((u) => u.role !== "teacher").sort((a, b) => (a.group || "").localeCompare(b.group || "") || a.name.localeCompare(b.name));
+  const who = h("select", {}, h("option", { value: "all" }, "👥 Barcha talabalar"), list.map((u) => h("option", { value: u.id }, `${u.name}${u.group ? ` (${u.group})` : ""}`)));
+  const topic = h("select", {}, TOPICS.map((t) => h("option", { value: t.id }, `${t.num}. ${t.title}`)));
+  const days = h("input", { type: "number", min: 1, max: 60, value: 7, style: { width: "80px" } });
+  const now = new Date().toISOString();
+  return h("div", { class: "card table-wrap" },
+    h("h3", {}, "🔓 Muddati o'tgan mavzuga ruxsat berish"),
+    h("p", { class: "muted small" }, "Talaba (yoki butun sinf) uchun mavzuning mustaqil ishlarini yana N kun topshirish imkoniyatini ochadi. Muddat tugagach yana avtomatik yopiladi."),
+    h("div", { class: "row wrap" },
+      h("label", { class: "field" }, h("span", {}, "Kimga"), who),
+      h("label", { class: "field" }, h("span", {}, "Mavzu"), topic),
+      h("label", { class: "field" }, h("span", {}, "Necha kun"), days),
+      h("button", { class: "btn", onclick: async () => {
+        try {
+          const r = await api.post("admin/deadline-ext", { userId: who.value, topicId: topic.value, days: Number(days.value) });
+          toast(`${r.name}: ${r.topicNum}-mavzu ${fmtDay(Date.parse(r.until))} gacha ochildi`, "ok");
+          reload();
+        } catch (e) {
+          toast(e.message, "error");
+        }
+      } }, "Ruxsat berish")),
+    exts.length
+      ? h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, ["Kimga", "Mavzu", "Gacha", "Berdi", "Holat", ""].map((x) => h("th", {}, x)))),
+          h("tbody", {}, exts.map((x) => h("tr", {},
+            h("td", {}, x.name),
+            h("td", {}, `${x.topicNum}-mavzu`),
+            h("td", {}, fmtDay(Date.parse(x.until))),
+            h("td", { class: "small muted" }, `${x.by} · ${fmtDate(x.at)}`),
+            h("td", {}, x.until > now ? h("span", { class: "badge badge-ok" }, "faol") : h("span", { class: "badge" }, "tugagan")),
+            h("td", {}, h("button", { class: "btn small ghost", onclick: async () => {
+              try {
+                await api.del(`admin/deadline-ext/${x.target}/${x.topicId}`);
+                reload();
+              } catch (e) {
+                toast(e.message, "error");
+              }
+            } }, "Bekor qilish"))))))
+      : h("p", { class: "muted" }, "Hozircha berilgan ruxsatlar yo'q."));
 }

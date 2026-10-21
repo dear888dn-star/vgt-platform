@@ -1,6 +1,7 @@
 import { h, mount, toast } from "../ui.js";
 import { api, session } from "../api.js";
 import { cohortPicker } from "./auth.js";
+import { deadlineNotice } from "../deadlines.js";
 
 const COHORT = { experimental: "Tajriba guruhi", control: "Nazorat guruhi", unassigned: "Belgilanmagan" };
 
@@ -39,6 +40,7 @@ export async function render(el) {
   mount(
     el,
     h("div", { class: "page-head" }, h("h1", {}, "Profil"), h("button", { class: "btn ghost", onclick: () => { session.clear(); location.hash = "#/"; } }, "Chiqish")),
+    user.role === "student" && deadlineNotice(),
     h(
       "div",
       { class: "grid cols-2-1" },

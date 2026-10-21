@@ -18,6 +18,7 @@ import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagn
 import { computeGame, certificateStatus } from "../../public/js/gamification.js";
 import { findTopic, tutorSystem, searchAnswer } from "../lib/tutor.mjs";
 import { TOPICS } from "../../public/data/topics.js";
+import { defaultSchedule, topicWindows, topicAccess, fmtDay } from "../../public/js/schedule.js";
 import { ARCHIVE } from "../../public/data/research-archive.js";
 import { itemAnalysis } from "../lib/itemstats.mjs";
 import { synthesize, ttsEnabled, ttsModels, ttsKey, VOICES, STYLES } from "../lib/tts.mjs";
@@ -700,8 +701,90 @@ async function setReportSettings(req) {
   return json({ ...REPORT_DEFAULTS, ...next });
 }
 
+// ---------- Dars jadvali va mustaqil ish muddatlari ----------
+// meta/schedule: { enabled, windowDays, lessons: [{ date, topicId }] }
+// deadline-ext/{userId | "all"}/{topicId}: o'qituvchi bergan muddat uzaytirish { until, ... }
+
+const loadSchedule = async () => (await db().get("meta/schedule")) || defaultSchedule();
+
+/** Talaba uchun mavzu bo'yicha ruxsat muddatlari: { topicId: untilISO } (shaxsiy va butun sinf uchun — kechrog'i). */
+async function extensionsFor(userId) {
+  const list = [...(await getMany(`deadline-ext/${userId}/`)), ...(await getMany("deadline-ext/all/"))];
+  const out = {};
+  for (const e of list) if (!out[e.topicId] || e.until > out[e.topicId]) out[e.topicId] = e.until;
+  return out;
+}
+
+async function getDeadlines(req) {
+  const user = await requireUser(req);
+  return json({ schedule: await loadSchedule(), ext: user.role === "student" ? await extensionsFor(user.id) : {}, now: new Date().toISOString() });
+}
+
+async function setSchedule(req) {
+  await requireTeacher(req);
+  const b = await body(req);
+  if (b.reset) {
+    await db().del("meta/schedule");
+    return json(defaultSchedule());
+  }
+  const ids = new Set(TOPICS.map((t) => t.id));
+  const lessons = (Array.isArray(b.lessons) ? b.lessons : [])
+    .slice(0, 200)
+    .map((l) => ({ date: str(l?.date, 10), topicId: str(l?.topicId, 40) }))
+    .filter((l) => /^\d{4}-\d{2}-\d{2}$/.test(l.date) && ids.has(l.topicId))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const windowDays = Math.max(0, Math.min(60, Math.round(Number(b.windowDays ?? 7)) || 0));
+  const next = { enabled: b.enabled !== false, windowDays, lessons };
+  await db().set("meta/schedule", next);
+  return json(next);
+}
+
+async function listExtensions(req) {
+  await requireTeacher(req);
+  const items = await getMany("deadline-ext/");
+  return json(items.sort((a, b) => b.at.localeCompare(a.at)));
+}
+
+async function grantExtension(req) {
+  const teacher = await requireTeacher(req);
+  const b = await body(req);
+  const topic = TOPICS.find((t) => t.id === b.topicId);
+  if (!topic) throw new HttpError(400, "Mavzuni tanlang");
+  const target = b.userId === "all" ? "all" : str(b.userId, 80);
+  let name = "Barcha talabalar";
+  if (target !== "all") {
+    const u = await db().get(userKey(target));
+    if (!u || u.role !== "student") throw new HttpError(404, "Talaba topilmadi");
+    name = u.name;
+  }
+  const days = Math.max(1, Math.min(60, Math.round(Number(b.days) || 7)));
+  const item = { target, name, topicId: topic.id, topicNum: topic.num, until: new Date(Date.now() + days * 864e5).toISOString(), days, by: teacher.name, at: new Date().toISOString() };
+  await db().set(`deadline-ext/${target}/${topic.id}`, item);
+  return json(item);
+}
+
+async function revokeExtension(req, target, topicId) {
+  await requireTeacher(req);
+  await db().del(`deadline-ext/${target}/${topicId}`);
+  return json({ ok: true });
+}
+
+/** Talaba topshirayotganda muddatni tekshiradi; yopiq bo'lsa 403. */
+async function assertTaskOpen(user, taskId) {
+  if (user.role !== "student") return;
+  const topic = TOPICS.find((t) => t.selfStudy?.some((s) => s.id === taskId));
+  if (!topic) return;
+  const schedule = await loadSchedule();
+  const ext = await extensionsFor(user.id);
+  const a = topicAccess(topicWindows(schedule), topic.id, ext[topic.id]);
+  if (a.allowed) return;
+  if (a.state === "upcoming") throw new HttpError(403, `${topic.num}-mavzu mustaqil ishlari ${fmtDay(a.open)} da ochiladi`);
+  throw new HttpError(403, `${topic.num}-mavzu mustaqil ishlarini topshirish muddati ${fmtDay(a.close)} da tugagan. Topshirish uchun o'qituvchidan ruxsat so'rang.`);
+}
+
 async function submitSelfStudy(req, taskId) {
   const user = await requireUser(req);
+  await assertTaskOpen(user, taskId);
   const b = await body(req);
   const text = str(b.text, 10000);
   const link = str(b.link, 500);
@@ -2357,6 +2440,11 @@ const routes = [
   ["GET", /^self-study$/, mySelfStudy],
   ["POST", /^self-study\/([\w-]+)$/, submitSelfStudy],
   ["POST", /^self-study\/([\w-]+)\/review$/, reviewSelfStudy],
+  ["GET", /^deadlines$/, getDeadlines],
+  ["PUT", /^admin\/schedule$/, setSchedule],
+  ["GET", /^admin\/deadline-ext$/, listExtensions],
+  ["POST", /^admin\/deadline-ext$/, grantExtension],
+  ["DELETE", /^admin\/deadline-ext\/([\w-]+)\/([\w-]+)$/, revokeExtension],
   ["GET", /^report-settings$/, getReportSettings],
   ["PUT", /^admin\/report-settings$/, setReportSettings],
 
