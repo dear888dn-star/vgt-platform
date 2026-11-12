@@ -615,10 +615,11 @@ function demoSelfReview(item) {
 }
 
 // ---------- AI kalitlari: sayt kaliti faqat egasi uchun, qolganlar o'z kaliti bilan ----------
-// AI_OWNER_EMAILS — sayt kalitidan (GEMINI_API_KEY / ANTHROPIC_API_KEY) foydalana oladigan akkauntlar (vergul bilan).
-// Boshqa foydalanuvchilar profilida o'z kalitini kiritadi; u omborda faqat shifrlangan holda saqlanadi va brauzerga qaytarilmaydi.
+// AI_OWNER_EMAILS — sayt kalitidan (GEMINI_API_KEY / ANTHROPIC_API_KEY) foydalana oladigan qo'shimcha akkauntlar (vergul bilan).
+// O'quvchilar profilida o'z kalitini kiritadi; u omborda faqat shifrlangan holda saqlanadi va brauzerga qaytarilmaydi.
 const aiOwners = () => (process.env.AI_OWNER_EMAILS || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-const isAiOwner = (user) => Boolean(user?.email) && aiOwners().includes(String(user.email).toLowerCase());
+// Sayt kaliti: AI_OWNER_EMAILS dagi akkauntlar va barcha o'qituvchilar (TEACHER_CODE bilan ro'yxatdan o'tganlar). Cheklov faqat o'quvchilarga.
+const isAiOwner = (user) => user?.role === "teacher" || (Boolean(user?.email) && aiOwners().includes(String(user.email).toLowerCase()));
 const aiKeyKey = (id) => `aikey/${id}`;
 
 async function userAiKey(user) {

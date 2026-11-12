@@ -46,8 +46,8 @@ export function aiKeyCard({ onChange, compact = false } = {}) {
       status?.has
         ? h("p", { class: "ai-key-state ok" }, `✅ ${PROVIDER[status.provider] || status.provider} kaliti saqlangan (…${status.last4}). Trenajyor va AI imkoniyatlari shu kalit bilan ishlaydi.`)
         : status?.owner
-          ? h("p", { class: "ai-key-state ok" }, "✅ Siz platforma egasisiz: sayt kaliti siz uchun ishlaydi. Xohlasangiz, o'z kalitingizni ham kiritishingiz mumkin.")
-          : h("p", { class: "ai-key-state warn" }, "Virtual trenajyordan foydalanish uchun o'z AI kalitingiz kerak. Platformaning kaliti faqat uning egasi uchun."),
+          ? h("p", { class: "ai-key-state ok" }, "✅ Platforma AI kaliti siz uchun ochiq (o'qituvchi). Xohlasangiz, o'z kalitingizni ham kiritishingiz mumkin — u holda sizning so'rovlaringiz shu kalit bilan ishlaydi.")
+          : h("p", { class: "ai-key-state warn" }, "Virtual trenajyordan foydalanish uchun o'z AI kalitingiz kerak. Platformaning kaliti faqat o'qituvchilar uchun."),
       form,
       remove,
       !compact && h("details", { class: "small" },
