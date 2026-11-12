@@ -21,5 +21,8 @@
     { "pattern": "www.etourism.uz", "custom_domain": true }
   ],
   "workers_dev": true,
+  // Panelda qo'shilgan oddiy o'zgaruvchilar (masalan AI_OWNER_EMAILS, EMEHMON_URL) deploy paytida o'chib ketmasin.
+  // Ular bu faylga yozilmaydi: repozitoriya ochiq, email va manzillar shu yerda ko'rinib qolmasin.
+  "keep_vars": true,
   "observability": { "enabled": true }
 }
