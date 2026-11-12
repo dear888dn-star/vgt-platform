@@ -150,10 +150,10 @@ export function dialogueScript(dialogue) {
   return { slots, lines };
 }
 
-async function callTts(model, prompt, speechConfig) {
+async function callTts(model, prompt, speechConfig, apiKey) {
   return fetch(`${API}/models/${model}:generateContent`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+    headers: { "content-type": "application/json", "x-goog-api-key": apiKey || process.env.GEMINI_API_KEY },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig } }),
   });
 }
@@ -162,8 +162,9 @@ async function callTts(model, prompt, speechConfig) {
  * Matnni (yoki suhbatni) ovozga aylantiradi. MP3 (Buffer) va ishlatilgan modelni qaytaradi.
  * Har bir modelning limiti alohida — biri band bo'lsa, keyingisi sinab ko'riladi.
  */
-export async function synthesize(text, { voice = "Kore", style = "narrator", dialogue = null } = {}) {
-  if (!ttsEnabled()) throw new TtsError("AI ovozi sozlanmagan (GEMINI_API_KEY)", 503);
+export async function synthesize(text, { voice = "Kore", style = "narrator", dialogue = null, apiKey = null } = {}) {
+  // apiKey — foydalanuvchining o'z Gemini kaliti; berilmasa, sayt kaliti (GEMINI_API_KEY)
+  if (!apiKey && !ttsEnabled()) throw new TtsError("AI ovozi sozlanmagan (GEMINI_API_KEY)", 503);
   let prompt;
   let speechConfig;
   if (dialogue?.length) {
@@ -182,7 +183,7 @@ export async function synthesize(text, { voice = "Kore", style = "narrator", dia
   let last = null;
   let rateLimited = null;
   for (const model of await ttsModels()) {
-    const r = await callTts(model, prompt, speechConfig);
+    const r = await callTts(model, prompt, speechConfig, apiKey);
     if (r.ok) {
       const d = await r.json();
       const part = (d?.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData?.data);

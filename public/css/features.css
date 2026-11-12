@@ -434,3 +434,14 @@
 .em-kpis { gap: 24px; margin: 6px 0 4px; }
 .em-kpis > div { display: flex; flex-direction: column; }
 .em-kpis b { font-size: 1.5rem; color: var(--primary); font-variant-numeric: tabular-nums; }
+
+/* ===== Shaxsiy AI kaliti ===== */
+.ai-key-card { margin: 14px 0; border-left: 4px solid var(--primary); }
+.ai-key-card h3 { margin: 0 0 6px; }
+.ai-key-form { gap: 8px; margin: 8px 0; }
+.ai-key-form input { flex: 1 1 280px; min-width: 0; font-family: ui-monospace, monospace; }
+.ai-key-state.ok { color: var(--ok); }
+.ai-key-state.warn { color: var(--warn); font-weight: 600; }
+.ai-key-toggle { margin: 10px 0; }
+.ai-key-toggle > summary { cursor: pointer; font-weight: 600; }
+.ai-key-toggle .ai-key-card { border-left: 0; box-shadow: none; padding: 8px 0 0; margin: 0; background: none; }

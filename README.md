@@ -53,6 +53,7 @@
    |---|---|---|
    | `JWT_SECRET` | ✅ | Uzun tasodifiy satr (masalan, 40+ belgi). Kirish tokenlarini imzolaydi. |
    | `TEACHER_CODE` | ✅ | O'qituvchi ro'yxatdan o'tishi uchun maxfiy kod. Faqat o'qituvchilarga bering. |
+   | `AI_OWNER_EMAILS` | ✅ (AI uchun) | Sayt AI kalitidan (`GEMINI_API_KEY` / `ANTHROPIC_API_KEY`) foydalana oladigan akkauntlarning email manzillari (vergul bilan). Qolgan foydalanuvchilar trenajyor va boshqa AI imkoniyatlari uchun **o'z kalitini** kiritadi: Trenajyor yoki Profil → «🔑 API kalitim». Kalit serverda AES-256-GCM bilan shifrlanib saqlanadi va brauzerga qaytarilmaydi. O'z kaliti bo'lmagan foydalanuvchi trenajyordan foydalana olmaydi; mustaqil ish tahlili, AI Ustoz va ekskursiya tahlili esa taxminiy (demo) rejimda ishlaydi. |
    | `EMEHMON_URL` | — | E-Mehmon simulyatori manzili, masalan `https://eguestsimulyator.<subdomen>.workers.dev`. |
    | `EMEHMON_SSO_SECRET` | — | Simulyatorga parolsiz kirish kaliti (32+ belgi); simulyatorda xuddi shu qiymat `SSO_SECRET`. |
    | `GEMINI_API_KEY` | tavsiya | Bepul Google Gemini API kaliti: [aistudio.google.com](https://aistudio.google.com) → Get API key. Trenajyor, ustoz maslahati va AI baholash shu orqali ishlaydi. |

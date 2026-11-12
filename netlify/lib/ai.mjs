@@ -12,7 +12,10 @@ const GEMINI_MODELS = (process.env.GEMINI_MODEL || "gemini-3.5-flash-lite,gemini
 
 export const provider = () => (process.env.ANTHROPIC_API_KEY ? "claude" : process.env.GEMINI_API_KEY ? "gemini" : null);
 export const aiEnabled = () => provider() !== null;
-export const modelName = () => (provider() === "claude" ? CLAUDE_MODEL : provider() === "gemini" ? GEMINI_MODELS[0] : "demo");
+// creds — foydalanuvchining o'z kaliti: { provider: "gemini" | "claude", apiKey }. Berilmasa, sayt kaliti ishlatiladi.
+const providerOf = (creds) => creds?.provider || provider();
+export const modelName = (creds) => (providerOf(creds) === "claude" ? CLAUDE_MODEL : providerOf(creds) === "gemini" ? GEMINI_MODELS[0] : "demo");
+const geminiKey = (creds) => (creds?.provider === "gemini" ? creds.apiKey : process.env.GEMINI_API_KEY);
 
 // Eski importlar uchun (sessiya yozuvida qaysi model ishlatilgani saqlanadi).
 export const MODEL = CLAUDE_MODEL;
@@ -32,7 +35,17 @@ function errorMessage(status) {
 
 const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"]);
 let client;
-function claudeClient() {
+const userClients = new Map();
+function claudeClient(creds) {
+  if (creds?.provider === "claude") {
+    let c = userClients.get(creds.apiKey);
+    if (!c) {
+      if (userClients.size > 50) userClients.clear();
+      c = new Anthropic({ apiKey: creds.apiKey, maxRetries: 1 });
+      userClients.set(creds.apiKey, c);
+    }
+    return c;
+  }
   if (!client) client = new Anthropic({ maxRetries: 1 });
   return client;
 }
@@ -52,7 +65,7 @@ function claudeStream(opts) {
   return new ReadableStream({
     async start(controller) {
       try {
-        const stream = claudeClient().beta.messages.stream(claudeParams(opts));
+        const stream = claudeClient(opts.creds).beta.messages.stream(claudeParams(opts));
         for await (const event of stream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") controller.enqueue(encoder.encode(event.delta.text));
         }
@@ -69,7 +82,7 @@ function claudeStream(opts) {
 }
 
 async function claudeComplete(opts) {
-  const response = await claudeClient().beta.messages.create(claudeParams(opts));
+  const response = await claudeClient(opts.creds).beta.messages.create(claudeParams(opts));
   if (response.stop_reason === "refusal") return "";
   return response.content.filter((b) => b.type === "text").map((b) => b.text).join("");
 }
@@ -99,7 +112,7 @@ async function geminiFetch(method, opts) {
     const url = `${GEMINI_URL}/${model}:${method}${method === "streamGenerateContent" ? "?alt=sse" : ""}`;
     const res = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+      headers: { "content-type": "application/json", "x-goog-api-key": geminiKey(opts.creds) },
       body: geminiBody(opts),
     });
     if (res.ok) return res;
@@ -166,14 +179,26 @@ async function geminiComplete(opts) {
 // ---------------- Umumiy interfeys ----------------
 
 /** Javob matnini bo'laklab uzatuvchi ReadableStream qaytaradi. */
-export function streamText({ system, messages, maxTokens = 2000, effort = "low", format }) {
-  const opts = { system, messages, maxTokens, effort, format };
-  return provider() === "gemini" ? geminiStream(opts) : claudeStream(opts);
+export function streamText({ system, messages, maxTokens = 2000, effort = "low", format, creds }) {
+  const opts = { system, messages, maxTokens, effort, format, creds };
+  return providerOf(creds) === "gemini" ? geminiStream(opts) : claudeStream(opts);
 }
 
-export async function completeText({ system, messages, maxTokens = 1000, effort = "low", format }) {
-  const opts = { system, messages, maxTokens, effort, format };
-  return provider() === "gemini" ? geminiComplete(opts) : claudeComplete(opts);
+export async function completeText({ system, messages, maxTokens = 1000, effort = "low", format, creds }) {
+  const opts = { system, messages, maxTokens, effort, format, creds };
+  return providerOf(creds) === "gemini" ? geminiComplete(opts) : claudeComplete(opts);
+}
+
+/** Foydalanuvchi kiritgan kalitni tekshiradi (modellar ro'yxatini so'rash — pullik emas). */
+export async function checkApiKey(prov, apiKey) {
+  const r =
+    prov === "claude"
+      ? await fetch(`${process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com"}/v1/models?limit=1`, { headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" } })
+      : await fetch(`${GEMINI_URL}?pageSize=1`, { headers: { "x-goog-api-key": apiKey } });
+  if (r.ok) return true;
+  const err = new Error(r.status === 400 || r.status === 401 || r.status === 403 ? "API kaliti noto'g'ri yoki faollashtirilmagan" : `Kalitni tekshirib bo'lmadi (${r.status})`);
+  err.status = r.status;
+  throw err;
 }
 
 // ---------------- Ovoz: nutq sintezi (TTS) va nutqni matnga aylantirish (STT) — Gemini ----------------
@@ -181,12 +206,12 @@ export async function completeText({ system, messages, maxTokens = 1000, effort 
 
 export const voiceEnabled = () => Boolean(process.env.GEMINI_API_KEY);
 
-async function geminiRaw(models, body) {
+async function geminiRaw(models, body, creds) {
   let last;
   for (const model of models) {
     const res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+      headers: { "content-type": "application/json", "x-goog-api-key": geminiKey(creds) },
       body: JSON.stringify(body),
     });
     if (res.ok) return res.json();
@@ -200,11 +225,11 @@ async function geminiRaw(models, body) {
 }
 
 /** Yozib olingan nutqni matnga aylantiradi (brauzerda nutqni tanish imkoni bo'lmaganda). */
-export async function transcribeAudio(base64, mimeType, { language = "o'zbek" } = {}) {
+export async function transcribeAudio(base64, mimeType, { language = "o'zbek", creds } = {}) {
   const lang = language === "ingliz" ? "English" : "Uzbek (write in Uzbek Latin script)";
   const data = await geminiRaw(GEMINI_MODELS, {
     contents: [{ parts: [{ inlineData: { mimeType, data: base64 } }, { text: `Transcribe this speech exactly as spoken. Language: ${lang}. Return only the transcript text, without quotes or comments. If there is no speech, return an empty string.` }] }],
     generationConfig: { maxOutputTokens: 800 },
-  });
+  }, creds);
   return partsText(data).trim();
 }

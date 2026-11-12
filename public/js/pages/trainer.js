@@ -5,6 +5,7 @@ import { competencyChips } from "../competency.js";
 import { FUNCTIONS } from "../../data/standard.js";
 import { createVoice, voiceSupport } from "../voice.js";
 import { sceneSVG } from "../landmarks.js";
+import { aiKeyCard } from "../aikey.js";
 
 // Har bir ssenariy uchun manzara (obida va kun vaqti)
 const SCENE_OF = {
@@ -27,7 +28,8 @@ const LEVEL_CLASS = { "Boshlang'ich": "lvl-1", "O'rta": "lvl-2", "Murakkab": "lv
 
 export async function renderList(el) {
   mount(el, loading());
-  const [{ scenarios: list, aiEnabled }, sessions] = await Promise.all([scenarios(), api.get("trainer/sessions")]);
+  const [{ scenarios: list, access }, sessions] = await Promise.all([scenarios(), api.get("trainer/sessions")]);
+  const keyChanged = () => { cache = null; renderList(el); };
   const best = {};
   for (const s of sessions) best[s.scenarioId] = Math.max(best[s.scenarioId] ?? 0, s.total);
   const categories = ["Barchasi", ...new Set(list.map((s) => s.category))];
@@ -72,7 +74,8 @@ export async function renderList(el) {
         h("p", { class: "lead" }, "AI turist, mijoz yoki ekskursiya ishtirokchisi rolini o'ynaydi. Siz gid yoki turizm mutaxassisi sifatida real vaqt rejimida harakat qilasiz: savollarga javob berasiz, muammolarni hal qilasiz, kutilmagan hodisalarga moslashasiz. Yakunda 5 mezon bo'yicha 100 ballik baho va shaxsiy tavsiyalar olasiz.")),
       h("div", { class: "trainer-steps" }, ["1. Ssenariyni tanlang", "2. Vaziyat bilan tanishing", "3. Real vaqtda muloqot qiling", "4. AI bahosi va tavsiyalar"].map((s) => h("div", { class: "trainer-step" }, s)))
     ),
-    !aiEnabled && h("div", { class: "alert alert-warn" }, "⚠️ Trenajyor demo-rejimda ishlamoqda: AI kaliti ulanmagan, personaj javoblari oldindan yozilgan. To'liq rejim uchun administrator GEMINI_API_KEY yoki ANTHROPIC_API_KEY ni sozlashi kerak."),
+    access === "none" ? aiKeyCard({ onChange: keyChanged }) : h("details", { class: "card ai-key-toggle" }, h("summary", {}, "🔑 API kalitim"), aiKeyCard({ onChange: keyChanged, compact: true })),
+    access === "demo" && h("div", { class: "alert alert-warn" }, "⚠️ Trenajyor demo-rejimda ishlamoqda: sayt AI kaliti ulanmagan, personaj javoblari oldindan yozilgan."),
     filters,
     grid,
     h("h2", { class: "section-title" }, "📈 Mening natijalarim"),
@@ -166,7 +169,7 @@ function listCard(title, items, kind) {
 
 export async function renderSession(el, id) {
   mount(el, loading());
-  const { scenarios: list, criteria, aiEnabled, voiceAI } = await scenarios();
+  const { scenarios: list, criteria, access, voiceAI } = await scenarios();
   const found = list.find((x) => x.id === id);
   if (!found) throw new Error("Ssenariy topilmadi");
   const s = { ...found, voiceAI };
@@ -196,9 +199,10 @@ export async function renderSession(el, id) {
       h("h3", {}, "Baholash mezonlari"),
       h("div", { class: "chips" }, criteria.map((c) => h("span", { class: "chip chip-soft" }, `${c.title} (${c.max})`))),
       h("div", { class: "alert alert-info" }, "Mashg'ulot davomida kutilmagan hodisalar yuz berishi mumkin. Vaqt real hisoblanadi. \"Ustoz maslahati\"dan foydalanish mumkin, ammo bu baholashda hisobga olinadi."),
-      !aiEnabled && h("div", { class: "alert alert-warn" }, "Demo-rejim: personaj javoblari oldindan yozilgan."),
+      access === "demo" && h("div", { class: "alert alert-warn" }, "Demo-rejim: personaj javoblari oldindan yozilgan."),
+      access === "none" && aiKeyCard({ onChange: () => { cache = null; renderSession(el, id); } }),
       (voiceSupport.tts || voiceSupport.stt) && h("div", { class: "alert alert-info voice-tip" }, h("b", {}, "🎙 Ovozli rejim: "), "personaj javoblarini ovoz chiqarib o'qiydi, siz esa mikrofon orqali gapirib javob berasiz — xuddi real vaziyatdagidek. Eng tabiiy o'zbekcha ovoz va nutqni tanish uchun Google Chrome yoki Microsoft Edge brauzeridan foydalaning."),
-      h("div", { class: "row wrap" },
+      access !== "none" && h("div", { class: "row wrap" },
         h("button", { class: "btn lg", onclick: () => startSession(el, s, criteria, false) }, "▶ Mashg'ulotni boshlash"),
         (voiceSupport.tts || voiceSupport.stt) && h("button", { class: "btn lg ghost voice-start", onclick: () => startSession(el, s, criteria, true) }, "🎙 Ovozli rejimda boshlash"))
     )

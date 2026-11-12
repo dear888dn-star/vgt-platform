@@ -1,6 +1,6 @@
 // Platformaning yagona API funksiyasi: /api/* so'rovlarini marshrutlaydi.
 import { db, getMany } from "../lib/store.mjs";
-import { hashPassword, verifyPassword, needsRehash, createToken, readToken, newId, setGeneratedSecret } from "../lib/auth.mjs";
+import { hashPassword, verifyPassword, needsRehash, createToken, readToken, newId, setGeneratedSecret, encryptSecret, decryptSecret } from "../lib/auth.mjs";
 import crypto from "node:crypto";
 import { SEED_SURVEYS, SEED_VERSION } from "../lib/seed-surveys.mjs";
 import {
@@ -12,7 +12,7 @@ import {
   hintPrompt,
   EVALUATION_SCHEMA,
 } from "../lib/scenarios.mjs";
-import { aiEnabled, streamText, completeText, modelName, provider, voiceEnabled, transcribeAudio } from "../lib/ai.mjs";
+import { aiEnabled, streamText, completeText, modelName, provider, voiceEnabled, transcribeAudio, checkApiKey } from "../lib/ai.mjs";
 import { demoReply, demoEvaluation } from "../lib/demo.mjs";
 import { STAGES, SECTION_C, publicInstrument, computeResult } from "../lib/diagnostics.mjs";
 import { computeGame, certificateStatus } from "../../public/js/gamification.js";
@@ -614,11 +614,71 @@ function demoSelfReview(item) {
   };
 }
 
+// ---------- AI kalitlari: sayt kaliti faqat egasi uchun, qolganlar o'z kaliti bilan ----------
+// AI_OWNER_EMAILS — sayt kalitidan (GEMINI_API_KEY / ANTHROPIC_API_KEY) foydalana oladigan akkauntlar (vergul bilan).
+// Boshqa foydalanuvchilar profilida o'z kalitini kiritadi; u omborda faqat shifrlangan holda saqlanadi va brauzerga qaytarilmaydi.
+const aiOwners = () => (process.env.AI_OWNER_EMAILS || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+const isAiOwner = (user) => Boolean(user?.email) && aiOwners().includes(String(user.email).toLowerCase());
+const aiKeyKey = (id) => `aikey/${id}`;
+
+async function userAiKey(user) {
+  const rec = await db().get(aiKeyKey(user.id));
+  const apiKey = rec && decryptSecret(rec.enc);
+  return apiKey ? { provider: rec.provider, apiKey } : null;
+}
+
+/** mode: "own" — o'z kaliti; "site" — sayt kaliti (faqat egasi); "demo" — egasi, lekin sayt kaliti yo'q; "none" — kalit yo'q. */
+async function aiAccess(user) {
+  const own = user ? await userAiKey(user) : null;
+  if (own) return { mode: "own", creds: own, provider: own.provider };
+  if (isAiOwner(user)) return aiEnabled() ? { mode: "site", creds: null, provider: provider() } : { mode: "demo", creds: null };
+  return { mode: "none", creds: null };
+}
+const aiOn = (a) => a.mode === "own" || a.mode === "site";
+const geminiVoice = (a) => (a.mode === "own" ? a.provider === "gemini" : a.mode === "site" && voiceEnabled());
+const NEED_KEY = "Trenajyordan foydalanish uchun o'z AI kalitingizni kiriting: Trenajyor → “🔑 API kalitim” (yoki Profil).";
+
+async function getAiKey(req) {
+  const user = await requireUser(req);
+  const rec = await db().get(aiKeyKey(user.id));
+  const a = await aiAccess(user);
+  return json({ has: Boolean(rec), provider: rec?.provider || null, last4: rec?.last4 || null, savedAt: rec?.savedAt || null, owner: isAiOwner(user), mode: a.mode });
+}
+
+async function setAiKey(req) {
+  const user = await requireUser(req);
+  const b = await body(req);
+  const apiKey = str(b.apiKey, 300).replace(/\s+/g, "");
+  if (apiKey.length < 20) throw new HttpError(400, "API kalitini to'liq kiriting");
+  const prov = apiKey.startsWith("sk-ant-") ? "claude" : apiKey.startsWith("AIza") ? "gemini" : b.provider === "claude" ? "claude" : "gemini";
+  try {
+    await checkApiKey(prov, apiKey);
+  } catch (e) {
+    throw new HttpError(e.status && e.status < 500 ? 400 : 502, e.message || "Kalitni tekshirib bo'lmadi");
+  }
+  const rec = { provider: prov, enc: encryptSecret(apiKey), last4: apiKey.slice(-4), savedAt: new Date().toISOString() };
+  await db().set(aiKeyKey(user.id), rec);
+  return json({ has: true, provider: prov, last4: rec.last4, savedAt: rec.savedAt, owner: isAiOwner(user), mode: "own" });
+}
+
+async function deleteAiKey(req) {
+  const user = await requireUser(req);
+  await db().del(aiKeyKey(user.id));
+  const a = await aiAccess(user);
+  return json({ has: false, owner: isAiOwner(user), mode: a.mode });
+}
+
+async function trainerScenarios(req) {
+  const user = await currentUser(req);
+  const a = await aiAccess(user);
+  return json({ scenarios: SCENARIOS.map(publicScenario), criteria: CRITERIA, aiEnabled: aiOn(a), access: a.mode, provider: a.provider || null, voiceAI: geminiVoice(a) });
+}
+
 const clampList = (a, n = 5) => (Array.isArray(a) ? a.map((x) => str(String(x ?? ""), 400)).filter(Boolean).slice(0, n) : []);
 
-async function aiSelfReview(item) {
+async function aiSelfReview(item, access) {
   const found = findSelfTask(item.taskId);
-  if (!aiEnabled()) return demoSelfReview(item);
+  if (!aiOn(access)) return demoSelfReview(item);
   const prompt = `Talabaning mustaqil ishini baholang.
 Fan mavzusi: ${found ? `${found.topic.num}-mavzu. ${found.topic.title}` : item.topicTitle}
 Topshiriq: ${found?.task.title || item.taskTitle} (${found?.task.type || "mustaqil ish"})
@@ -635,6 +695,7 @@ Javobni FAQAT JSON obyekt sifatida qaytaring: {"grade":4,"summary":"2–3 gapli 
   let last = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await completeText({
+      creds: access.creds,
       system: "Sen oliy ta'lim o'qituvchisi va pedagogik ekspertsan. Talabaning mustaqil ishini xolis baholaysan. Javobni faqat JSON ko'rinishida qaytar.",
       messages: [{ role: "user", content: prompt }],
       maxTokens: 2500,
@@ -657,7 +718,7 @@ Javobni FAQAT JSON obyekt sifatida qaytaring: {"grade":4,"summary":"2–3 gapli 
         strengths: clampList(obj.strengths),
         improvements: clampList(obj.improvements),
         recommendations: clampList(obj.recommendations),
-        model: modelName(),
+        model: modelName(access.creds),
         at: new Date().toISOString(),
       };
     }
@@ -671,7 +732,7 @@ async function reviewSelfStudy(req, taskId) {
   const key = `selfstudy/${user.id}/${taskId}`;
   const item = await db().get(key);
   if (!item) throw new HttpError(404, "Topshiriq topilmadi");
-  item.ai = await aiSelfReview(item);
+  item.ai = await aiSelfReview(item, await aiAccess(user));
   delete item.aiError;
   await db().set(key, item);
   return json(item);
@@ -837,7 +898,7 @@ async function submitSelfStudy(req, taskId) {
   };
   // AI tahlili (bir necha soniya). Xato bo'lsa ham topshiriq saqlanadi — keyin "AI tahlilini olish" tugmasi bilan qayta urinish mumkin.
   try {
-    item.ai = await aiSelfReview(item);
+    item.ai = await aiSelfReview(item, await aiAccess(user));
   } catch (err) {
     item.ai = null;
     item.aiError = err.message;
@@ -975,44 +1036,51 @@ function transcriptOf(s, history) {
 // ---------- Ovozli rejim ----------
 
 async function trainerTranscribe(req) {
-  await requireUser(req);
-  if (!voiceEnabled()) throw new HttpError(503, "Nutqni tanish sozlanmagan (GEMINI_API_KEY)");
+  const user = await requireUser(req);
+  const a = await aiAccess(user);
+  if (a.mode === "none") throw new HttpError(403, NEED_KEY);
+  if (!geminiVoice(a)) throw new HttpError(503, "Nutqni server orqali tanish uchun Gemini API kaliti kerak (Claude kaliti ovozni tanimaydi)");
   const b = await body(req);
   const s = findScenario(b.scenarioId);
   const audio = typeof b.audio === "string" ? b.audio : "";
   const mime = /^audio\/[\w.+-]+(;.*)?$/.test(String(b.mime)) ? String(b.mime).split(";")[0] : "audio/webm";
   if (!audio || audio.length > 4_000_000) throw new HttpError(400, "Audio yozuv bo'sh yoki juda uzun (eng ko'pi ~2 daqiqa)");
   try {
-    return json({ text: await transcribeAudio(audio, mime, { language: s.language }) });
+    return json({ text: await transcribeAudio(audio, mime, { language: s.language, creds: a.creds }) });
   } catch (err) {
     throw new HttpError(err.status === 429 ? 429 : 502, err.status === 429 ? "So'rovlar limiti tugadi, birozdan so'ng urinib ko'ring" : "Nutqni tanib bo'lmadi");
   }
 }
 
 async function trainerChat(req) {
-  await requireUser(req);
+  const user = await requireUser(req);
+  const a = await aiAccess(user);
+  if (a.mode === "none") throw new HttpError(403, NEED_KEY);
   const b = await body(req);
   const s = findScenario(b.scenarioId);
   const history = cleanHistory(b.messages);
   if (!history.length || history[history.length - 1].role !== "user") throw new HttpError(400, "Oxirgi xabar o'quvchiniki bo'lishi kerak");
-  if (!aiEnabled()) {
+  if (!aiOn(a)) {
     const encoder = new TextEncoder();
     const reply = demoReply(s, history);
     return textStream(new ReadableStream({ start(c) { c.enqueue(encoder.encode(reply)); c.close(); } }));
   }
-  return textStream(streamText({ system: personaSystemPrompt(s), messages: withOpening(s, history), maxTokens: 1500, effort: "low" }));
+  return textStream(streamText({ system: personaSystemPrompt(s), messages: withOpening(s, history), maxTokens: 1500, effort: "low", creds: a.creds }));
 }
 
 async function trainerHint(req) {
-  await requireUser(req);
+  const user = await requireUser(req);
+  const a = await aiAccess(user);
+  if (a.mode === "none") throw new HttpError(403, NEED_KEY);
   const b = await body(req);
   const s = findScenario(b.scenarioId);
   const history = Array.isArray(b.messages) && b.messages.length ? cleanHistory(b.messages) : [];
-  if (!aiEnabled()) {
+  if (!aiOn(a)) {
     const idx = Math.min(history.filter((m) => m.role === "user").length, s.objectives.length - 1);
     return json({ hint: `Maqsadga e'tibor bering: ${s.objectives[idx]}.`, demo: true });
   }
   const hint = await completeText({
+    creds: a.creds,
     system: hintPrompt(s),
     messages: [{ role: "user", content: `Suhbat hozirgacha:\n\n${transcriptOf(s, history)}\n\nMenga keyingi qadam uchun maslahat bering.` }],
     maxTokens: 800,
@@ -1022,6 +1090,8 @@ async function trainerHint(req) {
 
 async function trainerEvaluate(req) {
   const user = await requireUser(req);
+  const a = await aiAccess(user);
+  if (a.mode === "none") throw new HttpError(403, NEED_KEY);
   const b = await body(req);
   const s = findScenario(b.scenarioId);
   const history = cleanHistory(b.messages);
@@ -1033,11 +1103,12 @@ async function trainerEvaluate(req) {
 
   let evaluation;
   let evalDebug;
-  if (!aiEnabled()) {
+  if (!aiOn(a)) {
     evaluation = demoEvaluation(s, history, meta);
   } else {
     const ask = (strict) =>
       completeText({
+        creds: a.creds,
         system: "Sen pedagogik baholovchi ekspertsan. Javobni faqat berilgan JSON sxemasiga mos holda qaytar. Ballar butun son (0–20) bo'lsin.",
         messages: [{ role: "user", content: evaluationPrompt(s, transcriptOf(s, history), meta) + (strict ? `\n\nMUHIM: javob FAQAT JSON obyekt bo'lsin, hech qanday izohsiz. "scores" ichida aynan shu kalitlar bo'lsin: ${CRITERIA.map((c) => c.key).join(", ")} — har biri 0 dan 20 gacha butun son. Namuna: {"scores":{${CRITERIA.map((c) => `"${c.key}":14`).join(",")}},"summary":"...","standard":"...","strengths":["..."],"improvements":["..."],"recommendations":["..."]}` : "") }],
         maxTokens: 6000,
@@ -1108,7 +1179,8 @@ async function trainerEvaluate(req) {
     evaluation,
     total,
     ...(evalDebug ? { evalDebug } : {}),
-    model: modelName(),
+    model: modelName(a.creds),
+    aiKey: a.mode,
     createdAt: new Date().toISOString(),
   };
   await db().set(`trainer/${user.id}/${session.id}`, session);
@@ -1440,15 +1512,18 @@ async function ttsSpeak(req) {
   const key = ttsKey(text, voice, style);
   const meta = await db().get(ttsMetaKey(key));
   if (meta) return json({ url: ttsUrl(key), cached: true, seconds: meta.seconds });
-  if (!ttsEnabled()) throw new HttpError(503, "AI ovozi sozlanmagan (GEMINI_API_KEY)");
-  // Yangi ovoz yaratish faqat tizimga kirganlar uchun (bepul limitni himoya qilish).
+  // Yangi ovoz yaratish faqat tizimga kirganlar uchun: o'z Gemini kaliti bilan yoki (sayt egasi) sayt kaliti bilan.
   const user = await requireUser(req);
+  const access = await aiAccess(user);
+  const ownGemini = access.mode === "own" && access.provider === "gemini" ? access.creds.apiKey : null;
+  if (!ownGemini && access.mode !== "site") throw new HttpError(403, "Yangi AI ovozi yaratish uchun o'z Gemini API kalitingizni kiriting (Trenajyor → “🔑 API kalitim”)");
+  if (!ownGemini && !ttsEnabled()) throw new HttpError(503, "AI ovozi sozlanmagan (GEMINI_API_KEY)");
   const day = new Date().toISOString().slice(0, 10);
   const qKey = `ttsq/${day}/${user.id}`;
   const used = (await db().get(qKey))?.n || 0;
   if (used >= (TTS_DAILY[user.role] || 300)) throw new HttpError(429, "Bugungi AI ovozi limiti tugadi. Ertaga qayta urinib ko'ring.");
   try {
-    const out = await synthesize(text, { voice, style, dialogue });
+    const out = await synthesize(text, { voice, style, dialogue, apiKey: ownGemini });
     await db().setBinary(ttsBinKey(key), out.audio);
     await db().set(ttsMetaKey(key), { seconds: Math.round(out.seconds * 10) / 10, model: out.model, voice, style, chars: text.length, bytes: out.audio.length, createdAt: new Date().toISOString() });
     await db().set(qKey, { n: used + 1 });
@@ -1866,10 +1941,12 @@ async function reviewStudio(req, id) {
   if (!tour) throw new HttpError(404, "Ekskursiya topilmadi");
   if (!tour.stops.length) throw new HttpError(400, "Avval kamida bitta bekat qo'shing");
   let text;
-  if (!aiEnabled()) text = demoReview(tour);
+  const access = await aiAccess(user);
+  if (!aiOn(access)) text = demoReview(tour);
   else {
     const content = tour.stops.map((s, i) => `${i + 1}-bekat: ${s.title} (${s.city})\nGid matni: ${s.narration}\nFaktlar: ${s.facts.join("; ")}`).join("\n\n");
     text = await completeText({
+      creds: access.creds,
       system: "Sen tajribali gid-metodist va O'zbekiston tarixi bo'yicha mutaxassissan. Turizm texnikumi o'quvchisi tayyorlagan virtual ekskursiya matnini o'zbek tilida (lotin) tahlil qil. Markdown belgilari (*, #) ishlatma. Tuzilma: 1) Umumiy baho (10 ballik) va bir gapda xulosa; 2) Har bir bekat bo'yicha: faktlar aniqligi (shubhali yoki noto'g'ri faktlarni aniq ko'rsat), hikoya tuzilmasi (qiziqtiruvchi boshlanish, asosiy ma'lumot, rivoyat yoki qiziq detal, guruh bilan muloqot), til va uslub, davomiyligi; 3) Uchta eng muhim tavsiya. Qisqa va aniq yoz.",
       messages: [{ role: "user", content: `Ekskursiya: ${tour.title}\n${tour.description}\n\n${content}` }],
       maxTokens: 1400,
@@ -1890,7 +1967,8 @@ async function adminStudio(req) {
 // ---------- AI Ustoz (mavzu bo'yicha yordamchi) ----------
 
 async function topicAsk(req, topicId) {
-  await requireUser(req);
+  const user = await requireUser(req);
+  const access = await aiAccess(user);
   const topic = findTopic(topicId);
   if (!topic) throw new HttpError(404, "Mavzu topilmadi");
   const b = await body(req);
@@ -1898,10 +1976,10 @@ async function topicAsk(req, topicId) {
   if (raw[0]?.role === "assistant") raw = raw.slice(1);
   const history = cleanHistory(raw);
   if (!history.length || history[history.length - 1].role !== "user") throw new HttpError(400, "Savol bo'sh");
-  if (!aiEnabled()) {
+  if (!aiOn(access)) {
     return new Response(searchAnswer(topic, history[history.length - 1].content), { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
-  const stream = streamText({ system: tutorSystem(topic), messages: history, maxTokens: 900, effort: "low" });
+  const stream = streamText({ system: tutorSystem(topic), messages: history, maxTokens: 900, effort: "low", creds: access.creds });
   return new Response(stream, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 }
 
@@ -2480,7 +2558,10 @@ const routes = [
   ["GET", /^report-settings$/, getReportSettings],
   ["PUT", /^admin\/report-settings$/, setReportSettings],
 
-  ["GET", /^trainer\/scenarios$/, async () => json({ scenarios: SCENARIOS.map(publicScenario), criteria: CRITERIA, aiEnabled: aiEnabled(), voiceAI: voiceEnabled() })],
+  ["GET", /^trainer\/scenarios$/, trainerScenarios],
+  ["GET", /^me\/ai-key$/, getAiKey],
+  ["PUT", /^me\/ai-key$/, setAiKey],
+  ["DELETE", /^me\/ai-key$/, deleteAiKey],
   ["POST", /^trainer\/chat$/, trainerChat],
   ["POST", /^trainer\/transcribe$/, trainerTranscribe],
   ["POST", /^trainer\/hint$/, trainerHint],

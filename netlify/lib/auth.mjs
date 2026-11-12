@@ -68,3 +68,25 @@ export function readToken(token) {
 }
 
 export const newId = () => crypto.randomUUID();
+
+// ---------- Foydalanuvchining AI kaliti: omborda faqat shifrlangan holda (AES-256-GCM) ----------
+// Shifrlash kaliti JWT_SECRET (yoki avtomatik kalit) dan olinadi; u o'zgarsa, foydalanuvchilar kalitni qayta kiritadi.
+const vaultKey = () => crypto.createHash("sha256").update(`ai-key-vault:${secret()}`).digest();
+
+export function encryptSecret(text) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv("aes-256-gcm", vaultKey(), iv);
+  const enc = Buffer.concat([c.update(String(text), "utf8"), c.final()]);
+  return [iv, c.getAuthTag(), enc].map((b) => b.toString("base64")).join(".");
+}
+
+export function decryptSecret(blob) {
+  try {
+    const [iv, tag, enc] = String(blob).split(".").map((x) => Buffer.from(x, "base64"));
+    const d = crypto.createDecipheriv("aes-256-gcm", vaultKey(), iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(enc), d.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
