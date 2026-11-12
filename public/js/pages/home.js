@@ -73,6 +73,7 @@ export async function render(el) {
     ["📚", "Interaktiv mavzular", `${TOPICS.length} ta mavzu: o'quv qo'llanma matni, rasmlar, tushunchalar, nazorat savollari, testlar va 9 xil interaktiv metod.`, "#/topics"],
     ["🎙️", "Virtual gidlik trenajyori", "Sun'iy intellekt turist rolini o'ynaydi va sizni real vaqt rejimida kasbiy vaziyatlarga soladi.", "#/trainer"],
     ["🗺️", "Marshrut laboratoriyasi", "Turistik marshrutni raqamli xaritada modellashtirish: obyektlar bazasi, masofa va vaqt, marshrut pasporti.", "#/route-lab"],
+    ["🏨", "E-Mehmon simulyatori", "emehmon.uz tizimining o'quv nusxasi: mehmonlarni ro'yxatga olish, turistik yig'im, hisobotlar va 13 ta avtomatik baholanadigan topshiriq.", "#/emehmon"],
     ["🧩", "Mustaqil ta'lim", "Shaxsiy o'quv rejasi, mustaqil ish topshiriqlari, o'qituvchi bahosi va refleksiv kundalik.", "#/self-study"],
     ["📝", "Kompleks diagnostika", "T0–T2 bosqichlarida anketa, test, amaliy topshiriqlar va refleksiya — natijalar avtomatik hisoblanadi.", "#/diagnostics"],
     ["🎬", "Mediateka va audiokitob", "Animatsion darslar, video darslar, taqdimotlar — va qo'llanma matnini o'zbekcha AI ovozida tinglash.", "#/media"],

@@ -26,6 +26,7 @@ import * as studio from "./pages/studio.js";
 import * as live from "./pages/live.js";
 import * as geo from "./pages/geo.js";
 import * as migrate from "./pages/migrate.js";
+import * as emehmon from "./pages/emehmon.js";
 
 const routes = [
   [/^\/?$/, home.render],
@@ -36,6 +37,7 @@ const routes = [
   [/^\/topics\/([\w-]+)$/, topics.renderTopic],
   [/^\/self-study$/, selfStudy.render, { auth: true }],
   [/^\/trainer$/, trainer.renderList, { auth: true }],
+  [/^\/emehmon$/, emehmon.render, { auth: true }],
   [/^\/trainer\/([\w-]+)$/, trainer.renderSession, { auth: true }],
   [/^\/surveys$/, diagnostics.render, { auth: true }],
   [/^\/diagnostics$/, diagnostics.render, { auth: true }],
@@ -66,6 +68,7 @@ const NAV = [
   ["#/self-study", "Mustaqil ta'lim", "🧩"],
   ["#/route-lab", "Marshrut", "🗺️"],
   ["#/trainer", "Trenajyor", "🎙️"],
+  ["#/emehmon", "E-Mehmon", "🏨"],
   ["#/diagnostics", "Diagnostika", "📝"],
   ["#/standard", "Standart", "🎯"],
 ];

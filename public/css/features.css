@@ -429,3 +429,8 @@
 .dl-today { background: var(--primary-soft); }
 .dl-summary { font-size: 0.85rem; margin: 6px 0 10px; }
 @media (max-width: 640px) { .dl-chip { white-space: normal; } }
+
+/* ===== E-Mehmon simulyatori ===== */
+.em-kpis { gap: 24px; margin: 6px 0 4px; }
+.em-kpis > div { display: flex; flex-direction: column; }
+.em-kpis b { font-size: 1.5rem; color: var(--primary); font-variant-numeric: tabular-nums; }

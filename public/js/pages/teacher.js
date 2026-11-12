@@ -18,6 +18,7 @@ import { TOUR } from "./tour.js";
 import { createForm } from "./live.js";
 import { MILESTONES, milestoneRange, milestoneStatus } from "../milestones.js";
 import { topicWindows, topicAccess, fmtDay } from "../schedule.js";
+import { openSimulator } from "./emehmon.js";
 import { ARCHIVE, ARCHIVE_LEVELS, codesFrom, levelMean, levelIndexOfB, addLevels } from "../../data/research-archive.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
@@ -41,6 +42,7 @@ const SECTIONS = [
   { key: "students", icon: "👥", title: "O'quvchilar", group: "class", desc: "Ro'yxat, TG/NG guruhlariga ajratish, parolni tiklash.", meta: (o) => `${o.students} nafar · TG ${o.cohorts.experimental} · NG ${o.cohorts.control}` },
   { key: "self-study", icon: "🧩", title: "Mustaqil ishlar", group: "class", desc: "Topshiriqlarni baholash, AI tahlillari, bosqich PDF hisobotlari va titul ma'lumotlari.", badge: (o) => o.ungraded && [`${o.ungraded} ta baholanmagan`, "warn"], meta: (o) => `${o.selfStudySubmissions} ta topshiriq` },
   { key: "deadlines", icon: "📅", title: "Dars jadvali va muddatlar", group: "class", desc: "Darslarni kalendarga taqsimlash, mustaqil ishlarni topshirish oynasi (±1 hafta) va muddati o'tganlarga ruxsat berish." },
+  { key: "emehmon", icon: "🏨", title: "E-Mehmon simulyatori", group: "class", desc: "Talabalarning E-Mehmon o'quv simulyatoridagi topshiriqlar natijalari va simulyatorga o'qituvchi sifatida kirish." },
   { key: "routes", icon: "🗺", title: "Marshrut loyihalari", group: "class", desc: "10 mezonli rubrika bilan marshrut laboratoriyasi loyihalarini baholash.", badge: (o) => o.routes.submitted && [`${o.routes.submitted} ta yangi`, "warn"], meta: (o) => `${o.routes.graded} tasi baholangan` },
   { key: "trainer", icon: "🎙", title: "Trenajyor natijalari", group: "class", desc: "AI baholagan mashg'ulotlar, suhbat yozuvlari va mezonlar.", meta: (o) => `${o.trainerSessions} ta mashg'ulot${o.avgTrainerScore !== null ? ` · o'rtacha ${o.avgTrainerScore}` : ""}` },
   { key: "studio", icon: "🎬", title: "Ekskursiyalar", group: "class", desc: "O'quvchilar yaratgan virtual ekskursiyalar va AI tahlillari." },
@@ -67,7 +69,7 @@ const sectionHref = (key) => `#/teacher/${key}`;
 
 export async function render(el, tab = "", param) {
   const content = h("div");
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, backup: backupView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy, deadlines: deadlinesView };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, backup: backupView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy, deadlines: deadlinesView, emehmon: emehmonView };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   const sec = SECTIONS.find((x) => x.key === tab);
@@ -2300,4 +2302,41 @@ function extensionsCard(exts, students, reload) {
               }
             } }, "Bekor qilish"))))))
       : h("p", { class: "muted" }, "Hozircha berilgan ruxsatlar yo'q."));
+}
+
+// ---------- E-Mehmon simulyatori natijalari ----------
+async function emehmonView(el) {
+  let d;
+  try {
+    d = await api.get("admin/emehmon");
+  } catch (e) {
+    return mount(el, h("div", { class: "alert alert-warn" }, `Simulyatordan natijalarni olib bo'lmadi: ${e.message}`));
+  }
+  if (!d.enabled) {
+    return mount(el, h("div", { class: "card stack" },
+      h("h3", {}, "🏨 E-Mehmon simulyatori ulanmagan"),
+      h("p", {}, "Simulyator alohida loyiha (eguestsimulyator). Uni ulash uchun:"),
+      h("ol", {},
+        h("li", {}, "Ikkala loyihada bir xil maxfiy kalit o'rnating: platformada EMEHMON_SSO_SECRET, simulyatorda SSO_SECRET (32+ belgili tasodifiy satr)."),
+        h("li", {}, "Platformada EMEHMON_URL — simulyator manzili (masalan, https://eguestsimulyator.<subdomen>.workers.dev)."),
+        h("li", {}, "Ikkala Worker'ni qayta joylang. Shundan so'ng talabalar “E-Mehmon” bo'limidan parolsiz kiradi."))));
+  }
+  const openBtn = h("button", { class: "btn", onclick: () => openSimulator(openBtn) }, "🏨 Simulyatorni o'qituvchi sifatida ochish");
+  const items = [...d.items].sort((a, b) => (a.group || "").localeCompare(b.group || "") || a.name.localeCompare(b.name));
+  const avg = items.length ? (items.reduce((s, x) => s + x.score, 0) / items.length).toFixed(1).replace(".", ",") : "—";
+  mount(el,
+    h("div", { class: "row between wrap" }, h("p", { class: "muted" }, `Simulyator: ${d.url}`), openBtn),
+    h("div", { class: "grid cols-3" },
+      h("div", { class: "card stat-card" }, h("b", {}, items.length), h("span", { class: "muted small" }, "talaba simulyatorga kirgan")),
+      h("div", { class: "card stat-card" }, h("b", {}, avg), h("span", { class: "muted small" }, "o'rtacha ball (135 dan)")),
+      h("div", { class: "card stat-card" }, h("b", {}, items.filter((x) => x.tasksDone === x.taskCount).length), h("span", { class: "muted small" }, "barcha 13 topshiriqni bajargan"))),
+    items.length
+      ? h("div", { class: "card table-wrap" }, h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, ["Talaba", "Guruh", "O'quv mehmonxonasi", "Topshiriqlar", "Ball", "Mehmonlar", "Oxirgi kirish"].map((x) => h("th", {}, x)))),
+          h("tbody", {}, items.map((x) => h("tr", {},
+            h("td", {}, x.name), h("td", {}, x.group || "—"), h("td", { class: "small" }, x.hotelName || "—"),
+            h("td", {}, `${x.tasksDone} / ${x.taskCount}`),
+            h("td", {}, h("b", { class: x.score >= x.max * 0.8 ? "score-high" : x.score >= x.max * 0.6 ? "score-mid" : "score-low" }, `${x.score} / ${x.max}`)),
+            h("td", {}, x.guests), h("td", { class: "small muted" }, x.lastLogin ? fmtDate(x.lastLogin) : "—"))))))
+      : emptyState("🏨", "Hali hech kim kirmagan", "Talabalar “E-Mehmon” bo'limidagi “Simulyatorni ochish” tugmasi orqali kiradi."));
 }

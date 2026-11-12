@@ -19,6 +19,7 @@ import { computeGame, certificateStatus } from "../../public/js/gamification.js"
 import { findTopic, tutorSystem, searchAnswer } from "../lib/tutor.mjs";
 import { TOPICS } from "../../public/data/topics.js";
 import { defaultSchedule, topicWindows, topicAccess, fmtDay } from "../../public/js/schedule.js";
+import { emehmonEnabled, emehmonUrl, launchUrl, fetchResults } from "../lib/emehmon.mjs";
 import { ARCHIVE } from "../../public/data/research-archive.js";
 import { itemAnalysis } from "../lib/itemstats.mjs";
 import { synthesize, ttsEnabled, ttsModels, ttsKey, VOICES, STYLES } from "../lib/tts.mjs";
@@ -699,6 +700,34 @@ async function setReportSettings(req) {
   const next = Object.fromEntries(Object.keys(REPORT_DEFAULTS).map((k) => [k, str(b[k] ?? "", 200)]));
   await db().set("meta/report-settings", next);
   return json({ ...REPORT_DEFAULTS, ...next });
+}
+
+// ---------- E-Mehmon o'quv simulyatori (alohida loyiha, SSO orqali) ----------
+async function emehmonInfo(req) {
+  const user = await requireUser(req);
+  if (!emehmonEnabled()) return json({ enabled: false });
+  const out = { enabled: true, url: emehmonUrl() };
+  if (user.role === "student") {
+    try {
+      out.mine = (await fetchResults(user.id))[0] || null;
+    } catch (e) {
+      out.error = e.message;
+    }
+  }
+  return json(out);
+}
+
+async function emehmonLaunch(req) {
+  const user = await requireUser(req);
+  if (!emehmonEnabled()) throw new HttpError(503, "E-Mehmon simulyatori ulanmagan: administrator EMEHMON_URL va EMEHMON_SSO_SECRET ni sozlashi kerak");
+  return json({ url: launchUrl(user) });
+}
+
+async function emehmonResults(req) {
+  await requireTeacher(req);
+  if (!emehmonEnabled()) return json({ enabled: false, items: [] });
+  const items = await fetchResults();
+  return json({ enabled: true, url: emehmonUrl(), items });
 }
 
 // ---------- Dars jadvali va mustaqil ish muddatlari ----------
@@ -2441,6 +2470,9 @@ const routes = [
   ["POST", /^self-study\/([\w-]+)$/, submitSelfStudy],
   ["POST", /^self-study\/([\w-]+)\/review$/, reviewSelfStudy],
   ["GET", /^deadlines$/, getDeadlines],
+  ["GET", /^emehmon$/, emehmonInfo],
+  ["POST", /^emehmon\/launch$/, emehmonLaunch],
+  ["GET", /^admin\/emehmon$/, emehmonResults],
   ["PUT", /^admin\/schedule$/, setSchedule],
   ["GET", /^admin\/deadline-ext$/, listExtensions],
   ["POST", /^admin\/deadline-ext$/, grantExtension],
