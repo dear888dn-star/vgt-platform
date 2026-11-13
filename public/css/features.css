@@ -445,3 +445,7 @@
 .ai-key-toggle { margin: 10px 0; }
 .ai-key-toggle > summary { cursor: pointer; font-weight: 600; }
 .ai-key-toggle .ai-key-card { border-left: 0; box-shadow: none; padding: 8px 0 0; margin: 0; background: none; }
+
+/* ===== Diagnostika monitoringi (O'qituvchi paneli ichida) ===== */
+.results-board.in-panel { margin-top: 0; padding: 0; background: none; border-top: 0; }
+.results-board.in-panel .rb-inner { padding: 0; max-width: none; }

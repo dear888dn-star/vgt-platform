@@ -1,5 +1,5 @@
-// Sayt pastidagi ochiq monitoring oynasi: texnikumlar kesimida T0 / T1 / T2 diagnostika natijalari.
-// Faqat umumlashtirilgan ko'rsatkichlar (/api/public/results) ko'rsatiladi.
+// Monitoring oynasi (faqat O'qituvchi panelida): texnikumlar kesimida T0 / T1 / T2 diagnostika natijalari.
+// Umumlashtirilgan ko'rsatkichlar /api/public/results dan olinadi (faqat o'qituvchilar uchun).
 import { h } from "./ui.js";
 import { api } from "./api.js";
 import { reducedMotion, enhance } from "./motion.js";
@@ -97,17 +97,12 @@ function buildView(d, source, cohort) {
 let root;
 let tip;
 
-export function initResultsBoard() {
-  root = document.getElementById("results-board");
-  if (!root) return;
-  const io = new IntersectionObserver(
-    (entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return;
-      if (!state.data || Date.now() - state.loadedAt > 120_000) load();
-    },
-    { rootMargin: "300px 0px" }
-  );
-  io.observe(root);
+/** O'qituvchi paneli uchun monitoring bloki. */
+export function resultsBoardSection() {
+  root = h("section", { class: "results-board in-panel", "aria-label": "Diagnostika natijalari" });
+  if (state.data && Date.now() - state.loadedAt < 120_000) render();
+  else load();
+  return root;
 }
 
 async function load() {
@@ -178,7 +173,7 @@ function header(d) {
   return h(
     "div",
     { class: "rb-head" },
-    h("span", { class: "eyebrow" }, "Ochiq monitoring"),
+    h("span", { class: "eyebrow" }, "Monitoring · faqat o'qituvchilar uchun"),
     h("h2", {}, "Texnikumlar kesimida diagnostika natijalari"),
     h("p", { class: "muted" }, "Kompleks diagnostikaning boshlang'ich, oraliq va yakuniy bosqichlari bo'yicha umumlashtirilgan natijalar. 2024–2026-yillardagi tajriba-sinov natijalari (dissertatsiya, III bob) platformadagi yangi diagnostikalar bilan yagona mezon — B indeksi darajalari bo'yicha birlashtiriladi. Shaxsiy ma'lumotlar ko'rsatilmaydi.", d && state.source !== "archive" && h("span", { class: "rb-updated" }, ` Yangilangan: ${new Date(d.updatedAt).toLocaleString("uz-UZ", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}`))
   );

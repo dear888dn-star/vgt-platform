@@ -2,7 +2,6 @@
 import { h, mount, errorBox } from "./ui.js";
 import { session } from "./api.js";
 import { watch, transition, initTopbar } from "./motion.js";
-import { initResultsBoard } from "./results-board.js";
 import { initCelebrations } from "./celebrate.js";
 import { initTools } from "./search.js";
 import { initLightbox } from "./media.js";
@@ -154,7 +153,6 @@ initTopbar();
 initTools();
 initCelebrations();
 initLightbox();
-initResultsBoard();
 watch(main);
 route();
 

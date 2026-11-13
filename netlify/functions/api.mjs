@@ -2517,7 +2517,7 @@ const routes = [
   ["GET", /^me$/, async (req) => json(publicUser(await requireUser(req)))],
   ["PUT", /^me$/, updateMe],
   ["GET", /^health$/, health],
-  ["GET", /^public\/results$/, async () => json(await publicSnapshot())],
+  ["GET", /^public\/results$/, async (req) => (await requireTeacher(req), json(await publicSnapshot()))],
   ["GET", /^config$/, async () => json({ aiEnabled: aiEnabled(), teacherSignup: Boolean(process.env.TEACHER_CODE), colleges: await knownColleges() })],
 
   ["GET", /^slides$/, listSlides],

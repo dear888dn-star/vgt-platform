@@ -19,6 +19,7 @@ import { createForm } from "./live.js";
 import { MILESTONES, milestoneRange, milestoneStatus } from "../milestones.js";
 import { topicWindows, topicAccess, fmtDay } from "../schedule.js";
 import { openSimulator } from "./emehmon.js";
+import { resultsBoardSection } from "../results-board.js";
 import { ARCHIVE, ARCHIVE_LEVELS, codesFrom, levelMean, levelIndexOfB, addLevels } from "../../data/research-archive.js";
 
 const COHORTS = { experimental: "Tajriba (TG)", control: "Nazorat (NG)", unassigned: "Belgilanmagan" };
@@ -33,6 +34,7 @@ const GROUPS = [
 ];
 const SECTIONS = [
   { key: "archive", icon: "📚", title: "Tadqiqot arxivi", group: "research", desc: "2024–2026 tajriba-sinov natijalari (dissertatsiya III bob, n = 213) va yangi diagnostikalar bilan birlashtirilgan tahlil.", meta: () => "3 texnikum · TG 106 · NG 107" },
+  { key: "monitoring", icon: "📊", title: "Diagnostika monitoringi", group: "research", desc: "Texnikumlar kesimida T0–T2 diagnostika natijalari: integral ko'rsatkich (B), darajalar, TG/NG taqqoslash (avval sayt pastida ochiq ko'rsatilgan)." },
   { key: "diagnostics", icon: "🧪", title: "Kompleks diagnostika", group: "research", desc: "T0–T2 bosqichlari, anketa, test, amaliy topshiriqlar va rubrika bo'yicha baholash.", badge: (o) => o.diag.toGrade && [`${o.diag.toGrade} ta baholash kutmoqda`, "warn"], meta: (o) => `${o.diag.complete} ta to'liq varaqa · faol: ${o.diag.activeStage || "yo'q"}` },
   { key: "experiment", icon: "📐", title: "So'rovnomalar tahlili", group: "research", desc: "TG/NG taqqoslash: t-mezon, χ², Koen d, samaradorlik koeffitsiyenti η." },
   { key: "results", icon: "📈", title: "So'rovnoma natijalari", group: "research", desc: "Savollar bo'yicha taqsimot, M ± SD, darajalar, filtrlar va CSV.", meta: (o) => `${o.responses} ta javob · ${o.surveys} ta so'rovnoma` },
@@ -69,7 +71,7 @@ const sectionHref = (key) => `#/teacher/${key}`;
 
 export async function render(el, tab = "", param) {
   const content = h("div");
-  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, backup: backupView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy, deadlines: deadlinesView, emehmon: emehmonView };
+  const views = { "": overview, diagnostics, routes: routeProjects, competencies: competencyOverview, results, experiment, builder, slides: slidesManager, videos: videosManager, live: (el) => mount(el, createForm()), items: itemsView, archive: archiveView, backup: backupView, voices: voicesManager, studio: studioList, students, trainer, "self-study": selfStudy, deadlines: deadlinesView, emehmon: emehmonView, monitoring: (el) => mount(el, resultsBoardSection()) };
   const view = views[tab || ""];
   if (!view) throw new Error("Bo'lim topilmadi");
   const sec = SECTIONS.find((x) => x.key === tab);
@@ -2057,7 +2059,7 @@ async function archiveView(el) {
           h("td", { class: "num" }, `${fmt(c.mT)} / ${fmt(c.mN)}`),
           h("td", { class: "num" }, c.t ? `${fmt(c.t.t)}; ${significance(c.t.p)}; d = ${fmt(c.t.d)}` : "—"),
           h("td", { class: "num" }, c.chi ? `${fmt(c.chi.chi2)} (${fmt(c.chi.p, 3)})` : "—"))))),
-      h("p", { class: "small muted" }, "Yangi o'quvchilar ro'yxatdan o'tishda texnikum nomini ro'yxatdan tanlaydi va TG/NG guruhini belgilaydi — shunda ularning natijalari arxivdagi texnikum va guruh bilan avtomatik uyg'unlashadi. Bosh sahifa pastidagi ochiq monitoring ham “Birlashgan” ko'rinishda shu ma'lumotlarni ko'rsatadi.")),
+      h("p", { class: "small muted" }, "Yangi o'quvchilar ro'yxatdan o'tishda texnikum nomini ro'yxatdan tanlaydi va TG/NG guruhini belgilaydi — shunda ularning natijalari arxivdagi texnikum va guruh bilan avtomatik uyg'unlashadi. Panel → «Diagnostika monitoringi» ham “Birlashgan” ko'rinishda shu ma'lumotlarni ko'rsatadi.")),
     h("div", { class: "row end" }, h("button", { class: "btn ghost", onclick: () => downloadFile("tadqiqot-arxivi.csv", toCSV(csv)) }, "⬇ Arxiv jadvallari (CSV)"))
   );
 }
